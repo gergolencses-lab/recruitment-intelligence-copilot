@@ -1,4 +1,6 @@
-# 🎯 Recruitment Intelligence
+# JEL — Jelöltből jó döntés
+
+> A termék neve **JEL** (korábban: Recruitment Intelligence). A jel három befutó vonala a különböző forrásokból érkező jeleket, a korall pont a tisztán kirajzolódó következő döntést jelenti. Vizuális nyelv: mélykék oldalsáv (`#263653`), menta akció (`#20CFA8`), korall döntési pont (`#FF5A5F`), meleg törtfehér háttér.
 
 > **Egy közös mag, két felület.** Web-app (Surface A) + MCP-plugin (Surface B), ugyanarra a Capability API-ra kötve.
 > AI-támogatott recruitment workspace senior tech / CEE szerepekre. Termék-filozófia: **evidencia-alapú őszinteség** — a jelöltről csak ellenőrzött tény, a megközelítési ötletek nyíltan jelölt feltételezések.

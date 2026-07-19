@@ -297,7 +297,7 @@ if (!process.env.VERCEL) {
   app.listen(ric.config.port, () => {
     const mode = ric.brainAvailable() ? "🟢 AI elérhető (Claude)" : "🟡 Bemutató mód (nincs kulcs)";
     const reach = ric.reachLiveAvailable() ? "🟢 nyilvános webes források" : "🟡 mintaadatok";
-    console.log(`\n  Recruitment Intelligence`);
+    console.log(`\n  JEL — Jelöltből jó döntés`);
     console.log(`  → http://localhost:${ric.config.port}`);
     console.log(`  Mód: ${mode}  |  Adatforrás: ${reach}  |  modell: ${ric.config.model}\n`);
   });

@@ -121,5 +121,5 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 const transport = new StdioServerTransport();
 await server.connect(transport);
 console.error(
-  `Recruitment Intelligence MCP szerver fut (stdio). Mód: ${ric.brainAvailable() ? "AI elérhető" : "bemutató"} | Adatforrás: ${ric.reachLiveAvailable() ? "nyilvános web" : "mintaadatok"} | ${TOOLS.length} tool.`
+  `JEL MCP szerver fut (stdio). Mód: ${ric.brainAvailable() ? "AI elérhető" : "bemutató"} | Adatforrás: ${ric.reachLiveAvailable() ? "nyilvános web" : "mintaadatok"} | ${TOOLS.length} tool.`
 );
