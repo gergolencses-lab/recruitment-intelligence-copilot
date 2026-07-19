@@ -20,7 +20,7 @@ export { brainAvailable };
  * @param {number} [p.maxTokens]
  * @param {number} [p.temperature]
  */
-export async function think({ task, input, maxTokens = 2200, temperature = 0.4 }) {
+export async function think({ task, input, maxTokens = 6000, temperature = 0.4 }) {
   const c = client();
   if (!c) {
     const e = new Error("NO_BRAIN: nincs ANTHROPIC_API_KEY — demo-mód aktív.");
@@ -35,10 +35,10 @@ export async function think({ task, input, maxTokens = 2200, temperature = 0.4 }
     input +
     "\n\n---\nVálaszolj KIZÁRÓLAG egyetlen érvényes JSON objektummal, magyarázó szöveg, markdown vagy code-fence nélkül. Magyar mezőértékek, ahol szöveges tartalom. Ha egy mező nem tölthető ki evidenciával, adj üres tömböt vagy null-t, ne találj ki tényt.";
 
+  // temperature szándékosan nincs: az újabb modellek (claude-sonnet-5+) már nem fogadják.
   const resp = await c.messages.create({
     model: config.model,
     max_tokens: maxTokens,
-    temperature,
     system,
     messages: [{ role: "user", content: user }],
   });

@@ -49,7 +49,7 @@ export async function normalizeHits(hits) {
               `[${h.ref}] forrás=${h.source_type} url=${h.url}\ncím: ${h.title}\nleírás: ${h.description}\nkivonat: ${(h.excerpt || "").slice(0, 800)}`
           )
           .join("\n\n");
-      const out = await think({ task: EXTRACT_TASK, input, maxTokens: 3000, temperature: 0.2 });
+      const out = await think({ task: EXTRACT_TASK, input, maxTokens: 6000, temperature: 0.2 });
       for (const c of out.candidates || []) extracted[c.ref] = c;
     } catch {
       // ha az extrakció elhal, jön a heurisztika

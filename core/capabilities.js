@@ -145,7 +145,7 @@ Kimeneti JSON séma:
   const input = `JELÖLT:\n${J(candidate)}\n\nÉRTÉKELÉS:\n${J(assessment || {})}\n\nSZEREP:\n${J(intake || {})}`;
   return run(
     "attractionStrategy",
-    { task, input, demoInput: { candidate_id: candidate && candidate.id }, temperature: 0.6, maxTokens: 2600, guard: (o) => assertNoReject(o, "attractionStrategy") },
+    { task, input, demoInput: { candidate_id: candidate && candidate.id }, maxTokens: 6000, guard: (o) => assertNoReject(o, "attractionStrategy") },
     projectId
   );
 }
