@@ -33,7 +33,8 @@ export async function think({ task, input, maxTokens = 6000, temperature = 0.4 }
   ];
   const user =
     input +
-    "\n\n---\nVálaszolj KIZÁRÓLAG egyetlen érvényes JSON objektummal, magyarázó szöveg, markdown vagy code-fence nélkül. Magyar mezőértékek, ahol szöveges tartalom. Ha egy mező nem tölthető ki evidenciával, adj üres tömböt vagy null-t, ne találj ki tényt.";
+    "\n\n---\nVálaszolj KIZÁRÓLAG egyetlen érvényes JSON objektummal, magyarázó szöveg, markdown vagy code-fence nélkül. Magyar mezőértékek, ahol szöveges tartalom. Ha egy mező nem tölthető ki evidenciával, adj üres tömböt vagy null-t, ne találj ki tényt." +
+    "\nFogalmazz TÖMÖREN, töltelék nélkül: minden szöveges mező legyen lényegre törő (jellemzően 1–2 mondat), a listák max 3–4 magas jelértékű elem. A tömörség jel-sűrítés, nem tartalomvesztés — a hosszú, magyarázkodó kimenet hiba.";
 
   // temperature szándékosan nincs: az újabb modellek (claude-sonnet-5+) már nem fogadják.
   const resp = await c.messages.create({

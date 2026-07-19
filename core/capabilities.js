@@ -149,7 +149,9 @@ Kimeneti JSON séma:
   const input = `JELÖLT:\n${J(candidate)}\n\nÉRTÉKELÉS:\n${J(assessment || {})}\n\nSZEREP:\n${J(intake || {})}`;
   return run(
     "attractionStrategy",
-    { task, input, demoInput: { candidate_id: candidate && candidate.id }, maxTokens: 6000, guard: (o) => assertNoReject(o, "attractionStrategy") },
+    // 4000 backstop: a tömörség-direktívával a tényleges kimenet jóval ez alatt van,
+    // így a serverless 60s limit alatt marad, csonkolás nélkül.
+    { task, input, demoInput: { candidate_id: candidate && candidate.id }, maxTokens: 4000, guard: (o) => assertNoReject(o, "attractionStrategy") },
     projectId
   );
 }
