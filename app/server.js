@@ -71,6 +71,7 @@ app.get("/api/status", (req, res) => {
     model: ric.config.model,
     knowledge_version: ric.KNOWLEDGE_VERSION,
     mode: ric.brainAvailable() ? "live" : "demo",
+    commit: (process.env.VERCEL_GIT_COMMIT_SHA || "local").slice(0, 7), // deploy-marker
   });
 });
 

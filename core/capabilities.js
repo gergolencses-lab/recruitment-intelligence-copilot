@@ -104,9 +104,10 @@ export async function rankTargets({ candidates, intake }, { projectId } = {}) {
   const ids = (candidates || []).map((c) => c.id);
   const task = `FELADAT: Rangsorold a jelölteket ÜLDÖZÉSRE — kit hajszolj és milyen sorrendben. SENKI NEM ESIK KI. Ez nem elutasítás, hanem prioritás: mindenki kap helyet a sorban (A: most, B: párhuzamos, C: melegen tartsd).
 FONTOS: a "ranked" tömbnek MINDEN bemeneti jelöltet tartalmaznia kell.
+TÖMÖRSÉG (kötelező): ez egy gyors üldözési sor, NEM mély elemzés. A "rationale" EGYETLEN rövid mondat (max ~12 szó). Az "evidence" legfeljebb 1 rövid elem (vagy üres tömb). Ne írj bekezdéseket — a részletes elemzés az Assess/Attract dolga.
 Kimeneti JSON séma:
 {
- "ranked": [ { "candidate_id": "...", "name": "...", "pursue_priority": 1, "tier": "A — most üldözd|B — párhuzamos|C — melegen tartsd", "rationale": "...", "evidence": ["..."] } ],
+ "ranked": [ { "candidate_id": "...", "name": "...", "pursue_priority": 1, "tier": "A — most üldözd|B — párhuzamos|C — melegen tartsd", "rationale": "<egy rövid mondat>", "evidence": ["<max 1 elem>"] } ],
  "note": "Üldözési prioritás, NEM elutasítás."
 }`;
   const input = `JELÖLTEK:\n${J((candidates || []).map((c) => ({ id: c.id, name: c.name, headline: c.headline, signals: c.signals })))}\n\nSZEREP:\n${J(intake || {})}`;
@@ -115,6 +116,9 @@ Kimeneti JSON séma:
     {
       task,
       input,
+      // Tömör kimenet → gyors generálás, hogy a serverless 60s limit alatt maradjon
+      // akkor is, ha sok (10+) jelöltet kell egy hívásban rangsorolni.
+      maxTokens: 4000,
       demoInput: { candidates },
       guard: (o) => {
         assertNoReject(o, "rankTargets");
