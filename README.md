@@ -7,23 +7,25 @@ Ez egy **futtatható pilot** — nem mockup. Kulcs nélkül azonnal elindul (dem
 
 ---
 
-## 🌐 Kipróbálható élesben (publikus link)
+## 🌐 Kipróbálható élesben (publikus link — Vercel)
 
-> **▶ Élő demo:** _<ide kerül a Render-URL az első telepítés után>_
+> **▶ Élő app:** _<ide kerül a Vercel-URL az első telepítés után>_
 
-Bárki megnyithatja és valós keresést futtathat rajta. A backend a Renderen fut, a titkos kulcsok a Render env-változóiban élnek — sosem a repóban. (Ingyenes terv: ~15 perc tétlenség után elalszik, az első kérés ~50 mp hidegindítás, utána gyors.)
+Bárki megnyithatja és **valós Claude + Firecrawl** keresést futtathat rajta. A szerver a Vercelen fut serverless függvényként; a titkos kulcsok a Vercel env-változóiban élnek — **sosem a repóban, sosem a böngészőben.**
 
-### Telepítés Renderre — ~5 perc, egyszeri (Lencsés Gergő lépései)
+**Architektúra (miért működik ez serverless-en):** a szerver **állapotmentes** — nincs szerveroldali adatbázis. Minden projekt a **látogató saját böngészőjében** él (localStorage), és a művelethez elküldjük a szervernek, ami kiszámolja az eredményt és visszaadja. Így nulla plusz szolgáltatás kell, és minden látogató a saját munkáját látja. A Knowledge Core (`persona.js`) a szerveren marad, webről nem elérhető.
 
-1. Menj a **[render.com](https://render.com)** oldalra → **Sign in with GitHub** (engedélyezd a privát repo elérését).
-2. **New → Blueprint** → válaszd a `recruitment-intelligence-copilot` repót. A Render beolvassa a `render.yaml`-t.
-3. Amikor bekéri a **titkos env-változókat**, illeszd be:
+### Telepítés Vercelre — ~5 perc, egyszeri (Lencsés Gergő lépései)
+
+1. Menj a **[vercel.com](https://vercel.com)** oldalra → **Continue with GitHub** (engedélyezd a privát repo elérését).
+2. **Add New… → Project** → válaszd a `recruitment-intelligence-copilot` repót → **Import**.
+3. A **Environment Variables** résznél add meg a két titkos kulcsot:
    - `ANTHROPIC_API_KEY` → az `sk-ant-…` kulcsod
    - `FIRECRAWL_API_KEY` → az `fc-…` kulcsod
-4. **Apply / Create** → a Render buildel és elindítja. Kész, amikor a `/api/status` zöld.
-5. Másold a kapott URL-t (`https://recruitment-intelligence-copilot.onrender.com`) ide a README tetejére, és oszd meg akivel akarod.
+4. **Deploy.** A `vercel.json` mindent beállít (build- és route-szabályok). Kész, amikor a `/api/status` `mode:"live"`-ot ad.
+5. Másold a kapott URL-t (`https://…vercel.app`) ide a README tetejére, és oszd meg akivel akarod.
 
-_Alternatíva:_ [Railway](https://railway.app) vagy [Fly.io](https://fly.io) ugyanígy elviszi — mindkettő olvassa a `package.json` `start` scriptjét.
+> ⚠️ **Éles kulcsok publikusan:** bárki, akinek elküldöd a linket, a te API-kulcsaidat használja. Beépített **rate-limit** véd (40 művelet / IP / 15 perc), de érdemes költségkeretet állítani az Anthropic/Firecrawl fióknál. Burn-kulcshoz ideális.
 
 ---
 

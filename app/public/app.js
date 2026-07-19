@@ -3,6 +3,38 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const state = { projectId: null, project: null, status: null };
 
+// ── Kliens-oldali projekt-tár (localStorage) ────────────────────────────
+// A szerver STATELESS (Vercel-kompatibilis): nincs szerveroldali lemez, a
+// projekt-állapot a böngészőben él, és minden művelethez elküldjük a body-ban.
+const LS_KEY = "ric.projects.v1";
+function lsAll() { try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch { return {}; } }
+function lsSave(p) {
+  if (!p || !p.id) return p;
+  const all = lsAll();
+  p.updated_at = new Date().toISOString();
+  all[p.id] = p;
+  try { localStorage.setItem(LS_KEY, JSON.stringify(all)); } catch (e) { toast("A böngésző tárhelye megtelt — törölj régi projektet."); }
+  return p;
+}
+function lsGet(id) { return lsAll()[id] || null; }
+function lsList() {
+  return Object.values(lsAll())
+    .map((p) => ({ id: p.id, name: p.name, updated_at: p.updated_at, candidates: (p.candidates || []).length, has_brief: !!p.intake }))
+    .sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || ""));
+}
+function persist() { if (state.project) lsSave(state.project); }
+function emptyProjectJS(id, name) {
+  return {
+    id, name: name || id,
+    created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    brief_raw: "", intake: null, query: null, candidates: [], talent_map: null,
+    assessments: {}, ranking: null, attraction: {}, outreach: {}, outreach_status: {},
+    baseline_response_rate: null, first_shortlist_at: null,
+    pilot: { cooling_days: 7, mono_source_threshold: 0.7 },
+    advisory: null, interview: null, coach_notes: [], memory: [], interactions: [],
+  };
+}
+
 function el(tag, cls, html) {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -20,6 +52,11 @@ function toast(msg) {
   toast._t = setTimeout(() => t.classList.add("hidden"), 2600);
 }
 async function api(method, path, body) {
+  // Projekt-műveletekhez a stateless szerver a kliens állapotából dolgozik:
+  // elküldjük a teljes projektet a body-ban.
+  if (method === "POST" && /^\/api\/project\/[^/]/.test(path) && state.project) {
+    body = { ...(body || {}), project: state.project };
+  }
   const res = await fetch(path, {
     method,
     headers: { "Content-Type": "application/json" },
@@ -70,7 +107,7 @@ async function loadStatus() {
 
 // ── PROJECTS ────────────────────────────────────────────
 async function loadProjects() {
-  const list = await api("GET", "/api/projects");
+  const list = lsList();
   const sel = $("#projectSelect");
   sel.innerHTML = `<option value="">— válassz projektet —</option>` +
     list.map((p) => `<option value="${esc(p.id)}">${esc(p.name)} (${p.candidates} jelölt)</option>`).join("");
@@ -86,7 +123,8 @@ async function selectProject(id) {
     renderOverview(null);
     return;
   }
-  const p = await api("GET", `/api/project/${encodeURIComponent(id)}`);
+  const p = lsGet(id);
+  if (!p) { toast("A projekt nem található ebben a böngészőben."); state.projectId = null; renderOverview(null); return; }
   state.project = p;
   $("#projTitle").textContent = p.name;
   $("#crumbs").textContent = `Projekt · ${p.id}`;
@@ -233,6 +271,7 @@ async function trackOutreach(id, act) {
     state.project.outreach_status = state.project.outreach_status || {};
     if (r.status) state.project.outreach_status[id] = r.status; else delete state.project.outreach_status[id];
     const cd = (state.project.candidates || []).find((x) => x.id === id); if (cd) cd.last_touched = new Date().toISOString();
+    persist();
     renderOverview(state.project);
   } catch (e) { toast("Hiba: " + e.message); }
 }
@@ -271,6 +310,7 @@ async function touchCand(id) {
   try {
     await api("POST", `/api/project/${state.projectId}/touch`, { candidateId: id });
     const cd = (state.project.candidates || []).find((x) => x.id === id); if (cd) cd.last_touched = new Date().toISOString();
+    persist();
     renderOverview(state.project); toast("Rögzítve — kikerült a hűlő szálak közül.");
   } catch (e) { toast("Hiba: " + e.message); }
 }
@@ -341,9 +381,9 @@ function renderProof(p) {
     </div>
     <div class="note">A kiküldés/válasz adat a vezérlőpult jelöléseiből épül (a rendszer nem küld semmit). A teljes automata engagement/ATS Fázis 2. A szakaszidő-alapú konverzió akkor pontos, ha a szakaszváltások időbélyegzettek.</div>`;
 
-  const bs = $("#proofBaselineSave"); if (bs) bs.onclick = async () => { const r = await api("POST", `/api/project/${state.projectId}/baseline`, { rate: $("#proofBaseline").value }); state.project.baseline_response_rate = r.baseline_response_rate; renderProof(state.project); toast("Baseline mentve."); };
-  const sd = $("#proofShortDone"); if (sd) sd.onclick = async () => { const r = await api("POST", `/api/project/${state.projectId}/shortlist-done`, {}); state.project.first_shortlist_at = r.first_shortlist_at; renderProof(state.project); toast("Shortlist-idő rögzítve."); };
-  const sc = $("#proofShortClear"); if (sc) sc.onclick = async () => { await api("POST", `/api/project/${state.projectId}/shortlist-done`, { clear: true }); state.project.first_shortlist_at = null; renderProof(state.project); };
+  const bs = $("#proofBaselineSave"); if (bs) bs.onclick = async () => { const r = await api("POST", `/api/project/${state.projectId}/baseline`, { rate: $("#proofBaseline").value }); state.project.baseline_response_rate = r.baseline_response_rate; persist(); renderProof(state.project); toast("Baseline mentve."); };
+  const sd = $("#proofShortDone"); if (sd) sd.onclick = async () => { const r = await api("POST", `/api/project/${state.projectId}/shortlist-done`, {}); state.project.first_shortlist_at = r.first_shortlist_at; persist(); renderProof(state.project); toast("Shortlist-idő rögzítve."); };
+  const sc = $("#proofShortClear"); if (sc) sc.onclick = async () => { await api("POST", `/api/project/${state.projectId}/shortlist-done`, { clear: true }); state.project.first_shortlist_at = null; persist(); renderProof(state.project); };
 }
 
 // Chart 1 — fél-donut gauge: jelöltek forrás szerint
@@ -532,6 +572,7 @@ function renderCandidates(cands, p) {
       renderAssessInline($(".assess-slot", card), out);
       state.project.assessments = state.project.assessments || {};
       state.project.assessments[c.id] = out;
+      persist();
       renderOverview(state.project);
     });
     $(".attract-btn", card).onclick = () => {
@@ -605,6 +646,7 @@ function renderAttract(o, cand) {
   $("#outBtn").onclick = (e) => withLoading(e.target, async () => {
     const out = await api("POST", `/api/project/${state.projectId}/outreach`, { candidateId: cand.id, language: $("#outLang").value || undefined });
     if (state.project) { state.project.outreach = state.project.outreach || {}; state.project.outreach[cand.id] = out; }
+    persist();
     renderOutreach(out);
     renderOverview(state.project);
   });
@@ -653,7 +695,8 @@ $("#newProjBtn").onclick = async () => {
   const raw = $("#newProjId").value.trim();
   if (!raw) return toast("Adj meg egy projekt-azonosítót.");
   const id = raw.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  await api("POST", "/api/project", { id, name: raw });
+  if (!id) return toast("Érvénytelen azonosító.");
+  if (!lsGet(id)) lsSave(emptyProjectJS(id, raw));
   $("#newProjId").value = "";
   await loadProjects();
   $("#projectSelect").value = id;
@@ -663,28 +706,40 @@ $("#newProjBtn").onclick = async () => {
 $("#projectSelect").onchange = (e) => selectProject(e.target.value);
 
 $("#intakeBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
+  state.project.brief_raw = $("#briefInput").value;
   const out = await api("POST", `/api/project/${state.projectId}/intake`, { brief: $("#briefInput").value });
   state.project.intake = out;
+  persist();
   renderIntake(out);
   toast("Brief megtámadva.");
 });
 $("#queryBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
-  renderQuery(await api("POST", `/api/project/${state.projectId}/query`));
+  const q = await api("POST", `/api/project/${state.projectId}/query`);
+  state.project.query = q;
+  persist();
+  renderQuery(q);
 });
 $("#discoverBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
   const out = await api("POST", `/api/project/${state.projectId}/discover`, { source: $("#sourceSel").value });
-  state.project = await api("GET", `/api/project/${state.projectId}`);
+  state.project.candidates = out.candidates;
+  state.project.discover_note = out.note;
+  state.project.discover_source = out.source;
+  persist();
   renderCandidates(out.candidates, state.project);
   $("#discoverNote").innerHTML = `<div class="note">${esc(out.note)}</div>`;
   renderOverview(state.project);
   toast(`${out.candidates.length} jelölt felkutatva (${out.source}).`);
 });
 $("#talentBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
-  renderTalent(await api("POST", `/api/project/${state.projectId}/talent-map`));
+  const t = await api("POST", `/api/project/${state.projectId}/talent-map`);
+  state.project.talent_map = t;
+  persist();
+  renderTalent(t);
 });
 $("#rankBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
   const r = await api("POST", `/api/project/${state.projectId}/rank`);
   if (state.project) state.project.ranking = r;
+  persist();
   renderRank(r);
   renderOverview(state.project);
 });
@@ -694,28 +749,45 @@ $("#attractBtn").onclick = (e) => needProject() && withLoading(e.target, async (
   const cand = (state.project.candidates || []).find((c) => c.id === id);
   const out = await api("POST", `/api/project/${state.projectId}/attract`, { candidateId: id });
   if (state.project) { state.project.attraction = state.project.attraction || {}; state.project.attraction[id] = out; }
+  persist();
   renderAttract(out, cand);
   $("#outreachOut").innerHTML = "";
   renderOverview(state.project);
 });
-$("#advisoryBtn").onclick = (e) => needProject() && withLoading(e.target, async () => renderAdvisory(await api("POST", `/api/project/${state.projectId}/advisory`)));
-$("#interviewBtn").onclick = (e) => needProject() && withLoading(e.target, async () => renderInterview(await api("POST", `/api/project/${state.projectId}/interview`)));
+$("#advisoryBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
+  const a = await api("POST", `/api/project/${state.projectId}/advisory`);
+  state.project.advisory = a;
+  persist();
+  renderAdvisory(a);
+});
+$("#interviewBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
+  const iv = await api("POST", `/api/project/${state.projectId}/interview`);
+  state.project.interview = iv;
+  persist();
+  renderInterview(iv);
+});
 $("#coachBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
-  renderCoach(await api("POST", `/api/project/${state.projectId}/coach`, { context: $("#coachCtx").value }));
+  const out = await api("POST", `/api/project/${state.projectId}/coach`, { context: $("#coachCtx").value });
+  state.project.coach_notes = state.project.coach_notes || [];
+  state.project.coach_notes.push({ ts: new Date().toISOString(), ...out });
+  persist();
+  renderCoach(out);
 });
 
 // Memory drawer
 $("#memBtn").onclick = async () => {
   if (!needProject()) return;
   $("#memDrawer").classList.remove("hidden");
-  const m = await api("GET", `/api/project/${state.projectId}/memory`);
-  $("#memList").innerHTML = (m.memory || []).slice().reverse().map((e) => `<div class="mem-entry"><div class="t">${esc(e.ts)} · ${esc(e.kind)}</div>${esc(e.note)}</div>`).join("") || `<div class="empty">Még nincs jegyzet.</div>`;
+  const mem = (state.project && state.project.memory) || [];
+  $("#memList").innerHTML = mem.slice().reverse().map((e) => `<div class="mem-entry"><div class="t">${esc(e.ts)} · ${esc(e.kind)}</div>${esc(e.note)}</div>`).join("") || `<div class="empty">Még nincs jegyzet.</div>`;
 };
 $("#memClose").onclick = () => $("#memDrawer").classList.add("hidden");
 $("#memSave").onclick = async () => {
   const note = $("#memNote").value.trim();
   if (!note) return;
-  await api("POST", `/api/project/${state.projectId}/memory`, { note });
+  state.project.memory = state.project.memory || [];
+  state.project.memory.push({ ts: new Date().toISOString(), kind: "note", note });
+  persist();
   $("#memNote").value = "";
   $("#memBtn").click();
   toast("Mentve a projekt-memóriába.");
@@ -758,7 +830,7 @@ $$(".stage").forEach((s) => obs.observe(s));
 (async () => {
   await loadStatus();
   await loadProjects();
-  const list = await api("GET", "/api/projects");
+  const list = lsList();
   if (list.length) {
     $("#projectSelect").value = list[0].id;
     await selectProject(list[0].id);

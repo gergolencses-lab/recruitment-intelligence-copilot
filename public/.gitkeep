@@ -1,0 +1,3 @@
+# Szándékosan üres. A Vercel ezt látja statikus gyökérnek, így a forrásfájlok
+# (core/, app/server.js, persona.js) NEM elérhetők webről — minden a rewrite-on
+# át az Express-függvénybe megy, ami csak az app/public UI-t és a /api-t szolgálja.

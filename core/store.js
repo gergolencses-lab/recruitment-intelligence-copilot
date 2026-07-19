@@ -43,7 +43,7 @@ export function emptyProject(id, name) {
 }
 
 // Régi projektek előre-kompatibilissá tétele: hiányzó mezők feltöltése.
-function normalizeProject(p) {
+export function normalizeProject(p) {
   if (!p.outreach_status) p.outreach_status = {};
   if (p.baseline_response_rate === undefined) p.baseline_response_rate = null;
   if (p.first_shortlist_at === undefined) p.first_shortlist_at = null;
@@ -52,16 +52,25 @@ function normalizeProject(p) {
 }
 
 export function loadProject(id) {
-  ensureDirs();
-  const p = projPath(id);
-  if (!fs.existsSync(p)) return null;
-  return normalizeProject(JSON.parse(fs.readFileSync(p, "utf8")));
+  try {
+    ensureDirs();
+    const p = projPath(id);
+    if (!fs.existsSync(p)) return null;
+    return normalizeProject(JSON.parse(fs.readFileSync(p, "utf8")));
+  } catch {
+    // Serverless (pl. Vercel) csak-olvasható FS → a kliens tartja az állapotot.
+    return null;
+  }
 }
 
 export function saveProject(proj) {
-  ensureDirs();
   proj.updated_at = new Date().toISOString();
-  fs.writeFileSync(projPath(proj.id), JSON.stringify(proj, null, 2), "utf8");
+  try {
+    ensureDirs();
+    fs.writeFileSync(projPath(proj.id), JSON.stringify(proj, null, 2), "utf8");
+  } catch {
+    // Serverless csak-olvasható FS: a lemez-írás elhagyható, a kliens perzisztál (localStorage).
+  }
   return proj;
 }
 
@@ -78,24 +87,28 @@ export function upsertProject(id, name) {
 }
 
 export function listProjects() {
-  ensureDirs();
-  return fs
-    .readdirSync(PROJ_DIR)
-    .filter((f) => f.endsWith(".json"))
-    .map((f) => {
-      try {
-        const p = JSON.parse(fs.readFileSync(path.join(PROJ_DIR, f), "utf8"));
-        return {
-          id: p.id,
-          name: p.name,
-          updated_at: p.updated_at,
-          candidates: (p.candidates || []).length,
-          has_brief: !!p.intake,
-        };
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean)
-    .sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || ""));
+  try {
+    ensureDirs();
+    return fs
+      .readdirSync(PROJ_DIR)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => {
+        try {
+          const p = JSON.parse(fs.readFileSync(path.join(PROJ_DIR, f), "utf8"));
+          return {
+            id: p.id,
+            name: p.name,
+            updated_at: p.updated_at,
+            candidates: (p.candidates || []).length,
+            has_brief: !!p.intake,
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || ""));
+  } catch {
+    return []; // serverless: nincs lemez, a kliens listázza a saját projektjeit
+  }
 }
