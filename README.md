@@ -11,7 +11,8 @@ Ez egy **futtatható pilot** — nem mockup. Kulcs nélkül azonnal elindul (dem
 
 ## 🌐 Kipróbálható élesben (publikus link — Vercel)
 
-> **▶ Élő app:** **https://recruitment-intelligence-copilot.vercel.app**
+> **▶ Élő app (Vercel, élő Claude + webes kutatás):** **https://recruitment-intelligence-copilot.vercel.app**
+> **▶ Statikus demo (GitHub Pages, mintaadatok, kulcs nélkül):** **https://gergolencses-lab.github.io/recruitment-intelligence-demo/** — a `docs/` tükörből publikálva a publikus [`recruitment-intelligence-demo`](https://github.com/gergolencses-lab/recruitment-intelligence-demo) repón át; frissítés: `scripts/publish-demo.sh`
 
 Bárki megnyithatja és **valós Claude + Firecrawl** keresést futtathat rajta. A szerver a Vercelen fut serverless függvényként; a titkos kulcsok a Vercel env-változóiban élnek — **sosem a repóban, sosem a böngészőben.**
 
