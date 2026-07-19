@@ -1,7 +1,9 @@
-# 🎯 Recruitment Intelligence Copilot (RIC)
+# 🎯 Recruitment Intelligence
 
 > **Egy közös mag, két felület.** Web-app (Surface A) + MCP-plugin (Surface B), ugyanarra a Capability API-ra kötve.
-> Fejvadász-copilot senior tech / CEE szerepekre. Termék-filozófia: **evidencia-alapú őszinteség** — a jelöltről csak ellenőrzött tény, az elcsábítási ötletek nyíltan jelölt spekulációk.
+> AI-támogatott recruitment workspace senior tech / CEE szerepekre. Termék-filozófia: **evidencia-alapú őszinteség** — a jelöltről csak ellenőrzött tény, a megközelítési ötletek nyíltan jelölt feltételezések.
+>
+> A felület **megbízás-alapú**: egy megbízás = egy ügyfél egy konkrét pozíciója, saját metaadatokkal (pozíció, ügyfél, helyszín, munkavégzés, szint, felelős, státusz), feladatalapú nézetekkel (Áttekintés / Pozíció és brief / Célpiac / Jelöltek / Megkeresések / Ügyfél és interjú / Eredmények / Jegyzetek) és megbízásonként egy kiemelt következő teendővel.
 
 Ez egy **futtatható pilot** — nem mockup. Kulcs nélkül azonnal elindul (demo-mód, realisztikus HU minta-outputokkal); `ANTHROPIC_API_KEY` + `FIRECRAWL_API_KEY` megadásával **élesben** gondolkodik és **élő publikus-web scrapinget** végez.
 
@@ -27,7 +29,7 @@ Bárki megnyithatja és **valós Claude + Firecrawl** keresést futtathat rajta.
 
 > ⚠️ **Éles kulcsok publikusan:** bárki, akinek elküldöd a linket, a te API-kulcsaidat használja. Beépített **rate-limit** véd (40 művelet / IP / 15 perc), de érdemes költségkeretet állítani az Anthropic/Firecrawl fióknál. Burn-kulcshoz ideális.
 >
-> ⏱️ **Válaszidő:** az éles Claude-műveletek ~20-40 mp-esek (a `vercel.json` 60 mp-re állítja a függvény-limitet — ez a Hobby-max). Az élő Firecrawl-felkutatás a leglassabb; ha 60 mp-nél tovább tartana, válts a `szintetikus` forrásra a Discovernél, vagy tedd Pro-ra a projektet.
+> ⏱️ **Válaszidő:** az éles Claude-műveletek ~20-40 mp-esek (a `vercel.json` 60 mp-re állítja a függvény-limitet — ez a Hobby-max). Az élő webes jelöltkutatás a leglassabb; ha 60 mp-nél tovább tartana, válts `mintaadatok` forrásra a Célpiac nézetben, vagy tedd Pro-ra a projektet.
 
 ---
 
@@ -41,8 +43,8 @@ npm run app                 # → http://localhost:5178
 ```
 
 Nyisd meg a böngészőben: **http://localhost:5178**
-Hozz létre egy projektet (bal oldalt), illeszd be egy brief-et, és menj végig a vezetett íven:
-**Intake → Discover → Rank → ⭐ Attract → Advisory/Interjú → Coach.**
+Hozz létre egy megbízást (pozíció + ügyfél + alapadatok), illeszd be a briefet, és haladj a vezetett — de nem kényszerített — folyamaton:
+**Brief elemzése → Célpiac és jelöltkutatás → Prioritások → Megközelítési terv és üzenetvázlat → Ügyfélegyeztetés / Interjúterv → Eredmények.**
 
 Az MCP-felülethez (a saját AI-eszkzödbe):
 
@@ -52,14 +54,14 @@ npm run mcp                 # stdio MCP szerver
 
 ---
 
-## 🟢 Éles mód vs 🟡 Demo mód
+## 🟢 AI elérhető vs 🟡 Bemutató mód
 
 | | Nincs kulcs (demo) | Kulccsal (éles) |
 |---|---|---|
-| **🧠 Agy** (ítélet, elcsábítás, coach) | realisztikus HU minta-outputok | élő Claude (`ANTHROPIC_API_KEY`) |
-| **📡 Elérés** (discovery) | 14-fős szintetikus senior-tech-CEE pool | élő Firecrawl publikus-web keresés + scraping (`FIRECRAWL_API_KEY`) |
+| **🧠 Elemzés** (értékelés, megközelítési terv, módszertani segítség) | realisztikus HU minta-outputok | élő Claude (`ANTHROPIC_API_KEY`) |
+| **📡 Jelöltkutatás** | 14-fős minta-készlet (senior tech / CEE) | élő keresés nyilvánosan elérhető szakmai forrásokban (`FIRECRAWL_API_KEY`) |
 
-A felület tetején a badge mindig mutatja, épp melyik módban futsz. **Kulcsot csak a `.env`-be** — sosem a kódba, sosem a kliensbe.
+A felület mindig mutatja, épp melyik módban futsz (AI elérhető / Bemutató mód, élő források / mintaadatok). **Kulcsot csak a `.env`-be** — sosem a kódba, sosem a kliensbe.
 
 Kulcsok:
 - **Anthropic** — https://console.anthropic.com → `ANTHROPIC_API_KEY`
@@ -85,8 +87,8 @@ A motor egy **tiszta interfész** (`core/reach/reachEngine.js`) mögött ül —
 
 A legfontosabb szabály: a rendszer **a jelöltről csak ellenőrzött tényt állíthat** — amit a jeleiből (signals) evidenciálisan vissza lehet vezetni. Kitalált munkahely/szerep/motiváció TILOS.
 - `profile_assess` = **őszinte fit-ítélet** (erős / közepes / gyenge / nem fit), evidenciára építve — a rendszer kimondhatja, ha valaki nem fit.
-- `rank_targets` = őszinte üldözési prioritás (A/B/C/**D — nem éri meg**). Elszámoltathatóság: mindenki megjelenik a rangsorban (nem esik ki NÉMÁN), de a verdikt lehet elutasító — ezt a `core/guardrails.js` `assertRankingComplete` kényszeríti.
-- `attraction_strategy` = **két élesen elválasztott rész**: (1) *grounded read* — csak a jelekből visszavezethető tény, jel-hivatkozással + „amit nem tudunk" lista; (2) *attraction ideas* — 3 **nyíltan spekulatív** elcsábítási ötlet, versenyeztetve (a legjobb részletesen, kettő röviden). A `groundAttraction` guard kiszűri a nem-földelt állításokat.
+- `rank_targets` = őszinte prioritási javaslat (A — elsőként keresd meg / B — következő kör / C — figyelőlista / **D — most nem javasolt**). Elszámoltathatóság: mindenki megjelenik a rangsorban (nem esik ki némán), de a javaslat lehet elutasító — ezt a `core/guardrails.js` `assertRankingComplete` kényszeríti. A prioritást a recruiter a felületen felülbírálhatja.
+- `attraction_strategy` = **két élesen elválasztott rész**: (1) *grounded read* — csak a jelekből visszavezethető tény, jel-hivatkozással + „amit nem tudunk" lista; (2) *approach ideas* — 3 **nyíltan feltételezés-alapú** megközelítési ötlet, összevetve (a legerősebb részletesen, kettő röviden). A `groundAttraction` guard kiszűri a nem-földelt állításokat.
 
 A scraping **adatkezelővé** tesz → `art14_notice` generátor + provenance-tárolás a beépített válasz. Az őszinte fit-ítélet miatt a folyamat **emberi döntést** támogat (a recruiter dönt), nem automatizált elutasítást.
 
@@ -112,10 +114,10 @@ Az App és az MCP **kizárólag** a `core/index.js`-t importálja. A **Knowledge
 ### Fájlszerkezet
 ```
 core/
-  knowledge/persona.js   🔒 a senior fejvadász elméje (prompt-cache-elt, IP)
+  knowledge/persona.js   🔒 a rendszer szakmai tudásbázisa (prompt-cache-elt, IP)
   capabilities.js        a 11 képesség (App + MCP közös)
   reach/                 Reach Engine: firecrawl + szintetikus + normalize
-  guardrails.js          no-reject + PII-minimalizálás (kódban kikényszerítve)
+  guardrails.js          elszámoltathatóság + evidencia-földelés + PII-minimalizálás
   store.js  audit.js  art14.js  llm.js  demo.js  config.js
 app/                     Surface A — Express + statikus UI (public/)
 mcp/                     Surface B — MCP stdio szerver (14 tool)
@@ -160,10 +162,10 @@ node scripts/test-mcp.js   # az MCP-szerver 14 toolja felcsatlakozva
 
 - **Éles adat-tár:** JSON-store → Postgres + pgvector + **RLS** (tenant-izoláció).
 - **Reach Engine ipari skálázás:** residential/ISP proxy + identitás-pool a `reachEngine` seam mögé; vagy vendor-feed párhuzam.
-- **Eval-kapu:** golden set (15-30 valós eset) + rubrika, hogy az elcsábítás **mérhetően verje** a vanilla ChatGPT-t.
+- **Eval-kapu:** golden set (15-30 valós eset) + rubrika, hogy a megközelítési javaslat **mérhetően verje** a vanilla ChatGPT-t.
 - **Jogi keményítés:** HU/EU adatvédelmi + AI-Act jogász a skálázás előtt; LIA dokumentálás.
-- **Mérés:** elcsábítás pozitív-válasz arány A/B (a pilot elsődleges metrikája).
+- **Mérés:** válaszadási arány és pozitív válaszok aránya külön mutatóként, A/B a korábbi kézi válaszaránnyal szemben (a pilot elsődleges metrikája).
 
 ---
 
-*Model default: `claude-sonnet-5` (állítható a `.env`-ben — `claude-fable-5` a legerősebb ítélethez). Knowledge Core verzió: `kc-2026-07-19.v1`.*
+*Model default: `claude-sonnet-5` (állítható a `.env`-ben — `claude-fable-5` a legerősebb ítélethez). Knowledge Core verzió: `kc-2026-07-19.v2`.*

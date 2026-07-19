@@ -51,4 +51,4 @@ export function reachLiveAvailable() {
 }
 
 // Verzió-stamp az audithoz (a Knowledge Core verziója).
-export const KNOWLEDGE_VERSION = "kc-2026-07-19.v1";
+export const KNOWLEDGE_VERSION = "kc-2026-07-19.v2";

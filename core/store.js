@@ -15,10 +15,43 @@ function projPath(id) {
   return path.join(PROJ_DIR, `${safe}.json`);
 }
 
+// Megbízás-státuszok (üzleti állapot — nem azonos a belső AI-lépésekkel).
+export const STATUSES = [
+  "Előkészítés",
+  "Kutatás folyamatban",
+  "Megkeresés folyamatban",
+  "Interjúk folyamatban",
+  "Várakozik az ügyfélre",
+  "Szüneteltetve",
+  "Betöltve",
+  "Lezárva",
+];
+
+// A megbízás üzleti metaadatai (pozíció, ügyfél...). A technikai adatmodellben
+// a "project" név megmarad; a felületen a neve: Megbízás.
+export function emptyPosition() {
+  return {
+    title: "",        // pozíció neve
+    client: "",       // ügyfél
+    location: "",     // helyszín
+    work_mode: "",    // helyszíni | hibrid | távoli
+    seniority: "",    // tapasztalati szint
+    owner: "",        // felelős recruiter
+    hiring_manager: "",
+    language: "",
+    salary_band: "",
+    due_date: "",
+    priority: "",
+  };
+}
+
 export function emptyProject(id, name) {
   return {
     id,
     name: name || id,
+    position: emptyPosition(),
+    status: "Előkészítés",
+    priority_overrides: {}, // candidate_id -> "A"|"B"|"C"|"D" (recruiter felülbírálat)
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     brief_raw: "",
@@ -44,6 +77,9 @@ export function emptyProject(id, name) {
 
 // Régi projektek előre-kompatibilissá tétele: hiányzó mezők feltöltése.
 export function normalizeProject(p) {
+  if (!p.position) p.position = { ...emptyPosition(), title: p.name || p.id };
+  if (!p.status) p.status = (p.candidates || []).length ? "Kutatás folyamatban" : "Előkészítés";
+  if (!p.priority_overrides) p.priority_overrides = {};
   if (!p.outreach_status) p.outreach_status = {};
   if (p.baseline_response_rate === undefined) p.baseline_response_rate = null;
   if (p.first_shortlist_at === undefined) p.first_shortlist_at = null;

@@ -155,7 +155,7 @@ export async function gatherSynthetic() {
       synthetic: true,
       source_url: null,
       source_type: "synthetic",
-      art14_status: "n/a (szintetikus)",
+      art14_status: "n/a (mintaadat)",
       provenance: {
         method: "synthetic-pool",
         query: null,

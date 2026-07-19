@@ -1,6 +1,6 @@
 // Demo-mód: realisztikus HU minta-outputok, ha nincs ANTHROPIC_API_KEY.
-// Ezek mutatják a "senior agy" kimeneti FORMÁJÁT és színvonalát élesben.
-// A UI jelöli, hogy demo-adat. Kulcs megadásakor minden élőben generálódik.
+// Ezek mutatják az éles kimenetek FORMÁJÁT és színvonalát.
+// A UI jelöli, hogy minta-adat. Kulcs megadásakor minden élőben generálódik.
 
 export const demo = {
   intakeReframe: (input) => ({
@@ -13,12 +13,12 @@ export const demo = {
       "Mentorált/emelt más mérnököket",
     ],
     nice_to_haves: ["Payments/fintech domain", "Go vagy Rust", "OSS-jelenlét"],
-    bad_brief_flags: [
+    clarification_points: [
       "A '10+ év Java' fölösleges szűkítés — kizár erős poliglott mérnököket.",
       "A brief 'egyedül vigye a rendszert' + 'csapatépítés' — ez két külön szerep; tisztázni kell a hiring managerrel.",
     ],
-    hidden_requirements: [
-      "Valójában egy tech-lead kell, nem tiszta IC — a HM a 'senior' szót lead helyett használja.",
+    inferred_requirements: [
+      "A briefből következtetve valószínűleg tech-lead kell, nem tiszta IC — a 'senior' szó itt lead-szerepet takarhat. Egyeztetendő.",
     ],
     search_hypotheses: [
       "Régiós fintech scale-upök payments-csapatai",
@@ -62,19 +62,19 @@ export const demo = {
     fit: "erős",
     fit_reason:
       "A jelek payments-core productiont és OSS-karbantartást mutatnak — a szerep magja lefedve. A formális vezetés nyitott kérdés, de nem kizáró.",
-    seniority_read:
-      "Valódi staff-szint: rendszer-szintű döntéseket hoz és másokat emel. A payments-terhelés éles felelősség volt, nem hobbi.",
-    fit_signals: [
+    profile_summary:
+      "A jelek staff-szintre utalnak: rendszer-szintű döntések, mások emelése. A payments-terhelés éles felelősség volt, nem hobbi.",
+    role_relevant_signals: [
       { signal: "Payments core productionben 3 év", strength: "erős", evidence: "headline + konferencia-téma" },
       { signal: "OSS idempotency-lib karbantartás", strength: "közepes", evidence: "GitHub" },
       { signal: "Craft Conf előadás skálázásról", strength: "közepes", evidence: "publikus program" },
     ],
-    gaps_to_explore: [
-      "Vezetett-e formálisan csapatot, vagy technikai lead volt? — beszélgetésben tisztázni.",
+    questions_to_clarify: [
+      "Vezetett-e formálisan csapatot, vagy technikai lead volt? — a beszélgetésen tisztázandó.",
       "Mennyire volt on-call felelőssége?",
     ],
     unknowns: ["Jelenlegi elégedettsége / vált-e szívesen", "Fizetési elvárás", "Remote vs. iroda preferencia"],
-    standout: "Ritka kombináció: mély elosztott-rendszer + valós payments-tét + közösségi láthatóság.",
+    key_strength: "Ritka kombináció: mély elosztott-rendszer tapasztalat + valós payments-felelősség + közösségi láthatóság.",
     evidence: ["headline", "GitHub", "konferencia-program"],
   }),
 
@@ -86,19 +86,19 @@ export const demo = {
       ranked: cands.map((c, i) => ({
         candidate_id: c.id,
         name: c.name,
-        pursue_priority: i + 1,
+        contact_priority: i + 1,
         tier:
-          i < 3 ? "A — most üldözd"
-          : i < 7 ? "B — párhuzamos"
-          : i < n - 2 ? "C — melegen tartsd"
-          : "D — nem éri meg",
+          i < 3 ? "A — elsőként keresd meg"
+          : i < 7 ? "B — következő kör"
+          : i < n - 2 ? "C — figyelőlista"
+          : "D — most nem javasolt",
         rationale:
           i < 3 ? "Legerősebb evidencia + jó elérhetőség; itt a legmagasabb a válasz-esély."
           : i < n - 2 ? "Erős jel, de gyengébb elérhetőség vagy kevesebb megerősítő forrás."
-          : "A jelek gyengék vagy szerep-irrelevánsak — jelenleg nem éri meg üldözni.",
+          : "A jelek gyengék vagy szerep-irrelevánsak — most nem javasolt megkeresni.",
         evidence: (c.signals || []).slice(0, 1).map((s) => s.signal),
       })),
-      note: "Őszinte üldözési prioritás — a D-tier evidencia alapján jelenleg nem éri meg.",
+      note: "Prioritási javaslat evidencia alapján — a recruiter felülbírálhatja.",
     };
   },
 
@@ -117,18 +117,18 @@ export const demo = {
     attraction_ideas: [
       {
         rank: 1,
-        angle: "Tét, nem állás: 'a payments core, ami eldönti, hogy a cég skálázódik-e — a tiéd, és a csapat, amit köré formálsz.'",
-        hook: "A munkájára reflektálva: 'Láttam a skálázás-előadásod — pont ilyen fejjel keresünk valakit, aki eldönti, milyen legyen a rendszer, nem beáll egybe.'",
-        why_might_work: "A grounded jelek (OSS + konferencia) azt mutatják, szereti, ha a munkája látszik és számít — a scope+tulajdon üzenet erre épít. Spekuláció: a motiváció feltételezett.",
+        angle: "A szakmai kihívás és a hatáskör: a payments core, amelynek architektúrájáról ő dönthet, és a csapat, amelyet köré építhet.",
+        hook: "A munkájára reflektálva: 'Láttam a skálázás-előadásod — olyan embert keresünk, aki eldönti, milyen legyen a rendszer, nem csak beáll egy meglévőbe.'",
+        why_might_work: "A földelt jelek (OSS + konferencia) arra utalnak, fontos neki, hogy a munkája látható legyen és számítson — a hatáskör-üzenet erre épít. Feltételezés: a motiváció nem megerősített.",
         speculative: true,
       },
-      { rank: 2, angle: "IC→lead scope-emelés, ha váltáskész.", why_might_work: "Staff-jel van, formális vezetésre nincs — lehet neki új szint. Spekulatív.", speculative: true },
-      { rank: 3, angle: "Menekülés a láthatatlan legacy-karbantartástól egy zöldmezős rendszerbe.", why_might_work: "Gyakori senior-frusztráció, de erre KONKRÉT jel nincs — a leggyengébb hipotézis.", speculative: true },
+      { rank: 2, angle: "IC→lead hatáskör-bővülés, ha váltáskész.", why_might_work: "Staff-jel van, formális vezetésre nincs — lehet neki új szint. Feltételezés.", speculative: true },
+      { rank: 3, angle: "Zöldmezős rendszer a legacy-karbantartás helyett.", why_might_work: "Gyakori senior-motiváció, de erre konkrét jel nincs — a leggyengébb hipotézis.", speculative: true },
     ],
     recommended: 1,
-    channel: "Első kör NE LinkedIn-InMail (zajos). Ha van közös ismerős vagy warm szál a konferencia-Q&A-ból → azon. Másodlagos: rövid, személyes e-mail, ami a munkájára reflektál.",
-    timing: "Most: friss régiós tőkebevonások után a 'mit építesz a következő 2 évben' kérdés nyitott.",
-    risks: ["Sablonos megkeresés → azonnal kiesik a figyelme.", "Üres scope-ígéretet egy senior azonnal átlát."],
+    channel: "Első kör ne LinkedIn-InMail legyen (zajos). Ha van közös ismerős vagy kapcsolódás a konferencia-Q&A-ból → azon. Másodlagos: rövid, személyes e-mail, ami a munkájára reflektál.",
+    timing: "A friss régiós tőkebevonások után sok seniornál nyitott kérdés a 'mit építek a következő 2 évben' — ez most időszerűvé teheti a megkeresést.",
+    risks: ["Sablonos megkeresés → azonnal elveszíti a figyelmét.", "Megalapozatlan hatáskör-ígéret — egy tapasztalt jelölt azonnal átlátja."],
   }),
 
   outreachDraft: (input) => ({
@@ -136,15 +136,15 @@ export const demo = {
     candidate_id: input && input.candidate_id,
     language: "en",
     channel: "warm email / referral",
-    subject: "Your idempotency talk — and a payments core that needs your head",
+    subject: "Your idempotency talk — and a payments core that needs an owner",
     body:
       "Hi Ádám,\n\nI caught your Craft Conf talk on idempotency keys — the part about partial failures was exactly the kind of thinking most teams skip.\n\nI'm helping a payments team that's at the point where the core either scales or breaks. They don't want someone to *maintain* it — they want someone to decide what it should be, and build the team around it. Staff-to-lead scope, architecture ownership from day one, remote-first.\n\nNot a pitch, just a question: is 'the payments core is yours' the kind of problem you'd want to hear more about?\n\n— [név]",
     why_this_works: [
       "Az első mondat a SAJÁT munkájára reflektál (nem sablon).",
-      "A tétet kínálja, nem az állást.",
+      "A szakmai kihívást és a hatáskört mutatja be, nem csak a pozíciót.",
       "Alacsony súrlódású zárás: egy kérdés, nem egy CV-kérés.",
     ],
-    note: "Ez DRAFT — a recruiter nézi át és küldi. A rendszer nem küld semmit.",
+    note: "Vázlat — a recruiter ellenőrzi és küldi. A rendszer nem küld semmit.",
   }),
 
   clientAdvisory: (input) => ({
@@ -154,9 +154,9 @@ export const demo = {
       "Amit leírtatok, az valójában tech-lead, nem tiszta IC — igazítsuk a szintet és a bérsávot.",
       "A piac mozgásban: ha 3 hétnél tovább vársz a döntéssel, a top jelölt elmegy máshova.",
     ],
-    seniority_framing:
-      "A hiring manager felé úgy pozicionáld magad, mint aki a PIACOT ismeri, nem aki CV-t tol: hozz 2 konkrét piaci jelet (bérszint, elérhetőség), és egy kockázatot, amit ő nem lát.",
-    watch_outs: ["Túl hosszú folyamat", "Homályos scope", "Alulárazott sáv a régiós szinthez képest"],
+    meeting_preparation:
+      "Az egyeztetésre vigyél 2 konkrét piaci adatot (bérszint, elérhetőség) és egy kockázatot, amit a hiring manager még nem lát — így a beszélgetés a piacról szól, nem a CV-kről.",
+    watch_outs: ["Túl hosszú folyamat", "Homályos hatáskör", "Alulárazott sáv a régiós szinthez képest"],
   }),
 
   interviewIntel: (input) => ({
@@ -166,15 +166,15 @@ export const demo = {
       { competency: "Vezetés/emelés", question: "Volt, akit te emeltél a következő szintre? Hogyan?", what_good_looks_like: "Nevesített példa, konkrét lépések, nem 'segítettem a csapatnak'." },
       { competency: "Rendszer-döntés", question: "Egy architektúra-döntés, amit ma másképp hoznál meg — miért?", what_good_looks_like: "Önreflexió + tanulás, nem védekezés." },
     ],
-    red_flags_to_probe: ["Csak 'mi' nyelv, sose 'én' a felelősségnél", "Nem tud mérést mondani a hatásához"],
+    signals_to_clarify: ["Csak 'mi' nyelv, sose 'én' a felelősségnél", "Nem tud mérést mondani a hatásához"],
   }),
 
   recruitmentCoach: (input) => ({
     _demo: true,
-    what_a_senior_would_do:
-      "Egy senior nem a briefből indul, hanem megtámadja: 'miért pont Java?' és 'IC vagy lead?'. Te most a briefet végrehajtottad — a következő szinten a briefet jobbá teszed, mielőtt keresel.",
-    one_lever_now: "A megkeresésednél mindig kösd az első mondatot a jelölt SAJÁT munkájához — ez egyedül megduplázza a válaszarányt.",
-    skill_focus: "Reframe-készség: a rossz brief kiszúrása és tisztázása a hiring managerrel.",
-    encouragement: "A discovery-listád jó — a jelöltek relevánsak. A következő ugrás a személyre szabott elcsábításban van.",
+    recommended_approach:
+      "Ne a briefből indulj, hanem tisztázd: 'miért pont Java?' és 'IC vagy lead?'. A brief végrehajtása helyett a brief pontosítása hozza a legtöbb értéket — mielőtt keresel.",
+    one_lever_now: "A megkeresésnél mindig kösd az első mondatot a jelölt saját munkájához — ez önmagában érdemben emeli a válaszarányt.",
+    skill_focus: "Brief-tisztázás: az ellentmondások kiszúrása és egyeztetése a hiring managerrel.",
+    encouragement: "A jelöltlistád releváns — a következő lépés a személyre szabott megkeresésben van.",
   }),
 };

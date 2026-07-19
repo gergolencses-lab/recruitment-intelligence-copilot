@@ -108,7 +108,7 @@ async function judgeSkeptic(id) {
     "You are given the candidate's ACTUAL known signals. Your job: find every claim in the strategy's evidence/drivers that is NOT traceable to those signals — i.e. invented facts about this specific person. Be strict but fair: general market reasoning is allowed; invented biographical/employer/skill facts are NOT.";
   const user =
     "CANDIDATE (the only known facts):\n" + JSON.stringify({ name: cand.name, headline: cand.headline, company: cand.current_company, location: cand.location, synthetic: cand.synthetic, signals: (cand.signals || []).map((s) => s.signal) }) +
-    "\n\nATTRACTION STRATEGY:\n" + JSON.stringify({ what_moves_them: attract.what_moves_them, angle: attract.angle, hook: attract.hook, evidence: attract.evidence, confidence: attract.confidence }).slice(0, 8000) +
+    "\n\nATTRACTION STRATEGY:\n" + JSON.stringify({ known_facts: attract.grounded_read && attract.grounded_read.known_facts, unknowns: attract.grounded_read && attract.grounded_read.unknowns, confidence: attract.grounded_read && attract.grounded_read.confidence, attraction_ideas: attract.attraction_ideas, channel: attract.channel, timing: attract.timing }).slice(0, 8000) +
     "\n\nReturn ONLY JSON: {\"fabricated_claims\":[{\"claim\":\"..\",\"why\":\"why not traceable\"}]," +
     "\"grounded\":bool,\"calibrated\":bool,\"calibration_note\":\"is stated confidence honest given thin evidence? <=1 sentence\"}. No markdown.";
   return await askJSON(system, user, 2500);

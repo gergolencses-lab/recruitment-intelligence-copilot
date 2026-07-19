@@ -12,7 +12,7 @@ console.log(`brainAvailable=${ric.brainAvailable()}  reachLive=${ric.reachLiveAv
 
 const intake = await ric.intakeReframe({ brief });
 ok("intakeReframe → reframed_brief", !!intake.reframed_brief);
-ok("intakeReframe → bad_brief_flags", Array.isArray(intake.bad_brief_flags) && intake.bad_brief_flags.length > 0);
+ok("intakeReframe → clarification_points", Array.isArray(intake.clarification_points) && intake.clarification_points.length > 0);
 
 const query = await ric.queryBuild({ intake });
 ok("queryBuild → firecrawl_search_queries", Array.isArray(query.firecrawl_search_queries) && query.firecrawl_search_queries.length > 0);

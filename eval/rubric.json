@@ -9,11 +9,11 @@
       "reach": "synthetic",
       "advisory": true,
       "criteria": [
-        { "id": "01-a", "type": "judge", "field": "intake.bad_brief_flags", "must": "Jelzi rossz-brief-jelként a homályos 'mindenhez ért / rockstar / mindent egyszerre' megfogalmazást." },
-        { "id": "01-b", "type": "judge", "field": "intake.hidden_requirements", "must": "Felismeri, hogy ez valójában két külön profil lehet: platform-BUILDER (Go operátor/controller) vs. DevOps-ÜZEMELTETŐ." },
+        { "id": "01-a", "type": "judge", "field": "intake.clarification_points", "must": "Jelzi rossz-brief-jelként a homályos 'mindenhez ért / rockstar / mindent egyszerre' megfogalmazást." },
+        { "id": "01-b", "type": "judge", "field": "intake.inferred_requirements", "must": "Felismeri, hogy ez valójában két külön profil lehet: platform-BUILDER (Go operátor/controller) vs. DevOps-ÜZEMELTETŐ." },
         { "id": "01-c", "type": "auto", "field": "intake.reframed_brief", "must": "A mezőértékek magyarul vannak (HU-input helyes kezelése)." },
-        { "id": "01-d", "type": "judge", "field": "attract.angle|attract.offer_levers", "must": "Az elcsábítás horga a founding-impact / zöldmezős platform / opció-story, NEM a (nemlétező) cégmárka." },
-        { "id": "01-e", "type": "judge", "field": "attract.confidence|attract.what_moves_them[].confidence", "must": "Őszinte a szintetikus jelölt vékony evidenciájáról — nem tesz úgy, mintha biztos tudná a drivereket." }
+        { "id": "01-d", "type": "judge", "field": "attract.angle|attract.attraction_ideas", "must": "Az elcsábítás horga a founding-impact / zöldmezős platform / opció-story, NEM a (nemlétező) cégmárka." },
+        { "id": "01-e", "type": "judge", "field": "attract.grounded_read.confidence|attract.attraction_ideas[].speculative", "must": "Őszinte a szintetikus jelölt vékony evidenciájáról — nem tesz úgy, mintha biztos tudná a drivereket." }
       ]
     },
     "02": {
@@ -23,8 +23,8 @@
       "reach": "firecrawl",
       "advisory": false,
       "criteria": [
-        { "id": "02-a", "type": "judge", "field": "intake.bad_brief_flags", "must": "Jelzi, hogy az '5+ év PRODUCTION Rust + payments + distributed' túlspecifikált / szűk pool / unikornis-igény." },
-        { "id": "02-b", "type": "judge", "field": "intake.hidden_requirements|intake.search_hypotheses", "must": "Adjacens poolt nyit: erős distributed-systems mérnök (C++/Go, event-sourcing, exactly-once), akit Rustra át lehet képezni — nem ragaszkodik a lehetetlen tökéletes matchhez." },
+        { "id": "02-a", "type": "judge", "field": "intake.clarification_points", "must": "Jelzi, hogy az '5+ év PRODUCTION Rust + payments + distributed' túlspecifikált / szűk pool / unikornis-igény." },
+        { "id": "02-b", "type": "judge", "field": "intake.inferred_requirements|intake.search_hypotheses", "must": "Adjacens poolt nyit: erős distributed-systems mérnök (C++/Go, event-sourcing, exactly-once), akit Rustra át lehet képezni — nem ragaszkodik a lehetetlen tökéletes matchhez." },
         { "id": "02-c", "type": "judge", "field": "rank.ranked[].rationale", "must": "Az imperfekt (nem-tökéletes-Rust) jelölteket is rangsorolja érdemi indoklással — nem értékeli le csendben, no-reject szellemében." },
         { "id": "02-d", "type": "judge", "field": "attract.angle|attract.hook", "must": "A horog a probléma izgalma (zöldmezős ledger, 10ms/20k TPS, formal methods), nem a fizetés." }
       ]
@@ -50,7 +50,7 @@
       "advisory": false,
       "criteria": [
         { "id": "04-a", "type": "judge", "field": "intake.reframed_brief", "must": "Kihántja a hype alól a valódi igényt: megbízható model-serving + eval-keretrendszer + GPU-költséghatékonyság production LLM-hez." },
-        { "id": "04-b", "type": "judge", "field": "intake.bad_brief_flags", "must": "Jelzi a hype/túlspecifikáció ellentmondását (pl. '7+ év LLM production', 'rockstar 10x', category-defining közhelyek)." },
+        { "id": "04-b", "type": "judge", "field": "intake.clarification_points", "must": "Jelzi a hype/túlspecifikáció ellentmondását (pl. '7+ év LLM production', 'rockstar 10x', category-defining közhelyek)." },
         { "id": "04-c", "type": "judge", "field": "attract.angle|attract.hook", "must": "A forró piacon KONKRÉT technikai problémával/autonómiával differenciál — nem 'define the future of AI' típusú közhely." }
       ]
     },
@@ -61,8 +61,8 @@
       "reach": "synthetic",
       "advisory": true,
       "criteria": [
-        { "id": "05-a", "type": "judge", "field": "intake.bad_brief_flags", "must": "Jelzi, hogy a szerep-elvárások (embermenedzsment + legmélyebb IC + 60% kód + exec-komm + on-call + compliance) egy emberben nem férnek el." },
-        { "id": "05-b", "type": "judge", "field": "intake.reframed_brief|intake.hidden_requirements", "must": "Kimondja, hogy ez valójában KÉT különböző szerep/ember (Engineering Manager vs. Staff IC)." },
+        { "id": "05-a", "type": "judge", "field": "intake.clarification_points", "must": "Jelzi, hogy a szerep-elvárások (embermenedzsment + legmélyebb IC + 60% kód + exec-komm + on-call + compliance) egy emberben nem férnek el." },
+        { "id": "05-b", "type": "judge", "field": "intake.reframed_brief|intake.inferred_requirements", "must": "Kimondja, hogy ez valójában KÉT különböző szerep/ember (Engineering Manager vs. Staff IC)." },
         { "id": "05-c", "type": "judge", "field": "advisory.talking_points|advisory.watch_outs", "must": "A kliens-advisory javasolja a szerep kettévágását vagy a prioritás tisztázását (menedzser VAGY IC)." },
         { "id": "05-d", "type": "auto", "field": "rank.ranked", "must": "A rangsor továbbra is teljes — minden jelölt szerepel (no-reject nem sérül)." }
       ]
@@ -71,7 +71,7 @@
   "cross_cutting": {
     "no_reject_structural": "assertRankingComplete: minden discover-jelölt id-je megjelenik a rank.ranked[]-ben.",
     "live_mode": "Minden LLM-capability kimenetén _mode==='live'.",
-    "evidence_grounding": "attract.evidence és what_moves_them[].evidence visszavezethető a jelölt tényleges signals[]-ára — nincs kitalált tény.",
-    "calibration": "attract.confidence (és per-driver confidence) arányos a valódi evidencia-erővel (szintetikus jelöltnél alacsonyabb)."
+    "evidence_grounding": "attract.grounded_read.known_facts[].from_signal visszavezethető a jelölt tényleges signals[]-ára — nincs kitalált tény.",
+    "calibration": "attract.grounded_read.confidence arányos a valódi evidencia-erővel (minta-jelöltnél alacsonyabb), és az attraction_ideas nyíltan feltételezésként jelölt."
   }
 }

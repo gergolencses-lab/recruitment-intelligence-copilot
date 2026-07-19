@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Recruitment Intelligence Copilot</title>
+  <title>Recruitment Intelligence</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
 </head>
@@ -14,169 +14,139 @@
       <div class="brand">
         <div class="brand-mark">🎯</div>
         <div>
-          <div class="brand-name">Recruitment Copilot</div>
-          <div class="brand-sub">őszinte olvasat · bátor elcsábítás</div>
+          <div class="brand-name">Recruitment Intelligence</div>
+          <div class="brand-sub">Jelöltközpontú keresés</div>
         </div>
       </div>
 
-      <div class="side-label">Áttekintés</div>
       <nav class="steps">
-        <a href="#stage-overview" class="step" data-step="overview"><span class="dot"></span>Napi vezérlőpult</a>
-        <a href="#stage-proof" class="step" data-step="proof"><span class="dot"></span>Bizonyíték</a>
+        <a href="#" class="step" data-view="home"><span class="dot"></span>Megbízások</a>
       </nav>
 
-      <div class="side-label">Folyamat</div>
-      <nav class="steps" id="steps">
-        <a href="#stage-intake" class="step" data-step="intake"><span class="dot"></span>Intake — brief-támadás</a>
-        <a href="#stage-discover" class="step" data-step="discover"><span class="dot"></span>Discover — felkutatás</a>
-        <a href="#stage-rank" class="step" data-step="rank"><span class="dot"></span>Rank — üldözési sor</a>
-        <a href="#stage-attract" class="step" data-step="attract"><span class="dot"></span>Attract — elcsábítás<span class="hero-star">⭐</span></a>
-        <a href="#stage-client" class="step" data-step="client"><span class="dot"></span>Advisory + Interjú</a>
-        <a href="#stage-coach" class="step" data-step="coach"><span class="dot"></span>Coach</a>
-      </nav>
-
-      <div class="side-label">Projekt (kliensenként külön)</div>
-      <div class="side-block">
-        <select id="projectSelect"></select>
-        <div class="new-proj">
-          <input id="newProjId" placeholder="pl. acme-staff-be" />
-          <button id="newProjBtn" class="btn btn-ghost">+ Új</button>
-        </div>
+      <div id="engNav" class="hidden">
+        <div class="side-label" id="engNavLabel">Megbízás</div>
+        <nav class="steps">
+          <a href="#" class="step" data-view="attekintes"><span class="dot"></span>Áttekintés</a>
+          <a href="#" class="step" data-view="pozicio"><span class="dot"></span>Pozíció és brief</a>
+          <a href="#" class="step" data-view="celpiac"><span class="dot"></span>Célpiac</a>
+          <a href="#" class="step" data-view="jeloltek"><span class="dot"></span>Jelöltek</a>
+          <a href="#" class="step" data-view="megkeresesek"><span class="dot"></span>Megkeresések</a>
+          <a href="#" class="step" data-view="ugyfel"><span class="dot"></span>Ügyfél és interjú</a>
+          <a href="#" class="step" data-view="eredmenyek"><span class="dot"></span>Eredmények</a>
+          <a href="#" class="step" data-view="jegyzetek"><span class="dot"></span>Jegyzetek</a>
+        </nav>
       </div>
 
       <div class="side-foot">
+        <div class="side-label">Névjegy</div>
+        <div class="badges badges-side" id="badges"><span class="badge badge-mut">állapot…</span></div>
         <div id="modelLine" class="mut"></div>
-        <div>A tudás + a scraping szerver-oldalon marad.</div>
+        <div>Az elemzés és az adatkezelés szerver-oldalon fut; a megbízások ebben a böngészőben tárolódnak.</div>
       </div>
     </aside>
 
     <!-- ── MAIN ── -->
     <main class="main">
-      <!-- Meridian topbar -->
       <header class="topbar">
         <div class="search-pill">
-          <input id="globalSearch" placeholder="Jelölt keresése a poolban…" autocomplete="off" />
+          <input id="globalSearch" placeholder="Jelölt keresése…" autocomplete="off" />
           <span class="kbd">⌘ F</span>
         </div>
         <div class="top-right">
-          <div class="badges" id="badges"><span class="badge badge-mut">állapot…</span></div>
-          <div class="top-div"></div>
-          <div class="user-chip">
-            <div class="avatar">RIC</div>
-            <div>
-              <div class="user-name">Recruitment Copilot</div>
-              <div class="user-sub" id="modelLineTop">senior-fejű fejvadász</div>
-            </div>
-          </div>
+          <div class="badges" id="badgesTop"></div>
         </div>
       </header>
 
       <div class="scroll" id="scroll">
 
-        <!-- content header -->
-        <div class="page-head">
-          <div>
-            <div class="crumbs" id="crumbs">Nincs projekt kiválasztva</div>
-            <h1 id="projTitle">Válassz vagy hozz létre projektet</h1>
+        <!-- ── MEGBÍZÁSOK (nyitóképernyő) ── -->
+        <section id="view-home" class="view">
+          <div class="page-head">
+            <div>
+              <div class="crumbs">Munkatér</div>
+              <h1>Megbízások</h1>
             </div>
-          <div class="head-actions">
-            <button id="exportBtn" class="period-pill" title="Projekt exportálása JSON-ban">Export</button>
-            <button id="memBtn" class="btn btn-primary" title="Projekt-memória">🧠 Memória</button>
-          </div>
-        </div>
-
-        <!-- ── COCKPIT (Zita napi vezérlőpultja) ── -->
-        <section class="stage plain" id="stage-overview">
-          <div id="ckStatus"></div>
-          <div class="ck-main">
-            <div class="ck-col-main">
-              <div id="ckHero"></div>
-              <div id="ckStuck"></div>
+            <div class="head-actions">
+              <button id="newEngBtn" class="btn btn-primary">Új megbízás</button>
             </div>
-            <aside class="ck-col-side">
-              <div id="ckCoverage"></div>
-            </aside>
           </div>
+          <div class="eng-filters" id="engFilters"></div>
+          <div id="newEngForm" class="hidden"></div>
+          <div id="engList"></div>
         </section>
 
-        <!-- ── PROOF (tulaj / fizető partner nézet) ── -->
-        <section class="stage plain" id="stage-proof">
-          <div id="proofBody"></div>
-        </section>
+        <!-- ── MEGBÍZÁS-MUNKATÉR ── -->
+        <section id="workspace" class="hidden">
+          <div id="engHeader"></div>
 
-        <!-- 1) INTAKE -->
-        <section class="stage" id="stage-intake">
-          <div class="stage-head"><h2>Intake — a senior megtámadja a briefet</h2>
-            <p class="stage-sub">Illeszd be a hiring manager briefjét. A RIC nem végrehajtja — jobbá teszi: kiszúrja a rossz briefet, a rejtett igényt, és megmondja, hol vannak ezek az emberek.</p></div>
-          <textarea id="briefInput" class="brief" placeholder="Illeszd be a nyers briefet ide…"></textarea>
-          <div class="row" style="margin-top:10px"><button id="intakeBtn" class="btn btn-primary">Támadd meg a briefet</button></div>
-          <div id="intakeOut" class="out"></div>
-        </section>
+          <section id="view-attekintes" class="view eng-view"></section>
 
-        <!-- 2) DISCOVER -->
-        <section class="stage" id="stage-discover">
-          <div class="stage-head"><h2>Discover — passzív jelöltek felkutatása 📡</h2>
-            <p class="stage-sub">Publikus webes keresés + scraping (élő módban Firecrawl, belépett LinkedIn-scraping nélkül). Kulcs nélkül minta-jelöltekkel fut.</p></div>
-          <div class="row">
-            <button id="queryBtn" class="btn">Keresési stratégia építése</button>
-            <span class="src-toggle">forrás:
-              <select id="sourceSel">
-                <option value="auto">auto</option>
-                <option value="firecrawl">firecrawl (élő)</option>
-                <option value="synthetic">szintetikus</option>
-              </select>
-            </span>
-            <button id="discoverBtn" class="btn btn-primary">Felkutatás indítása</button>
-            <button id="talentBtn" class="btn btn-ghost">Talent map</button>
-          </div>
-          <div id="queryOut" class="out"></div>
-          <div id="discoverNote"></div>
-          <div id="candidateGrid" class="cand-grid"></div>
-          <div id="talentOut" class="out"></div>
-        </section>
+          <section id="view-pozicio" class="view eng-view">
+            <div class="poz-grid">
+              <div class="stage">
+                <div class="stage-head"><h2>Brief</h2>
+                  <p class="stage-sub">Illeszd be a hiring manager nyers briefjét. Az elemzés eredménye javaslat — te hagyod jóvá vagy szerkeszted.</p></div>
+                <textarea id="briefInput" class="brief" placeholder="Illeszd be a nyers briefet ide…"></textarea>
+                <div class="row" style="margin-top:10px"><button id="intakeBtn" class="btn btn-primary">Brief elemzése</button></div>
+                <div class="stage-head" style="margin-top:18px"><h2>Pozícióadatok</h2></div>
+                <div id="posForm"></div>
+              </div>
+              <div class="stage">
+                <div class="stage-head"><h2>Javasolt pozíció-összefoglaló</h2>
+                  <p class="stage-sub">A rendszer javaslata a briefből — jóváhagyás előtt ellenőrizd.</p></div>
+                <div id="intakeOut" class="out"></div>
+              </div>
+            </div>
+          </section>
 
-        <!-- 3) RANK -->
-        <section class="stage" id="stage-rank">
-          <div class="stage-head"><h2>Rank — üldözési prioritás (nem elutasítás)</h2>
-            <p class="stage-sub">Őszinte üldözési prioritás: kit hajszolj MOST (A), párhuzamosan (B), tarts melegen (C) — és kit nem éri meg (D). Mindenki elszámolva, de a verdikt lehet elutasító.</p></div>
-          <div class="row"><button id="rankBtn" class="btn btn-primary">Rangsorolj üldözésre</button></div>
-          <div id="rankOut" class="out"></div>
-        </section>
+          <section id="view-celpiac" class="view eng-view">
+            <div class="stage">
+              <div class="stage-head"><h2>Célpiac</h2>
+                <p class="stage-sub">Hol dolgoznak a szerephez illő emberek, és milyen keresésekkel érdemes megtalálni őket.</p></div>
+              <div class="row">
+                <button id="queryBtn" class="btn">Keresési terv készítése</button>
+                <button id="talentBtn" class="btn">Célpiac-térkép</button>
+                <button id="discoverBtn" class="btn btn-primary">Jelöltkutatás indítása</button>
+              </div>
+              <details class="adv-details"><summary>Adatforrás és részletek</summary>
+                <div class="row" style="margin-top:8px">
+                  <span class="src-toggle">Adatforrás:
+                    <select id="sourceSel">
+                      <option value="auto">automatikus</option>
+                      <option value="firecrawl">nyilvános webes források (élő)</option>
+                      <option value="synthetic">mintaadatok</option>
+                    </select>
+                  </span>
+                </div>
+              </details>
+              <div id="queryOut" class="out"></div>
+              <div id="talentOut" class="out"></div>
+              <div id="discoverNote"></div>
+            </div>
+          </section>
 
-        <!-- ATTRACT (hero) -->
-        <section class="stage stage-hero" id="stage-attract">
-          <div class="stage-head"><h2>Attract — személyre szabott elcsábítási terv ⭐</h2>
-            <p class="stage-sub">Válassz célszemélyt. A terv megmondja: mi mozgatja, mivel szólítsd meg, mikor és melyik csatornán — belőle készül a személyre szabott megkereső.</p></div>
-          <div class="row">
-            <label>Célszemély:</label>
-            <select id="attractCand"></select>
-            <button id="attractBtn" class="btn btn-primary">⭐ Elcsábítási terv</button>
-          </div>
-          <div id="attractOut" class="out"></div>
-          <div id="outreachOut" class="out"></div>
-        </section>
+          <section id="view-jeloltek" class="view eng-view"></section>
 
-        <!-- CLIENT -->
-        <section class="stage" id="stage-client">
-          <div class="stage-head"><h2>Client Advisory + Interjú-intelligencia</h2>
-            <p class="stage-sub">Mit mondj a hiring managernek, hogy seniornak tűnj — és éles interjúkérdések a kompetenciamodellből.</p></div>
-          <div class="row">
-            <button id="advisoryBtn" class="btn">Client advisory</button>
-            <button id="interviewBtn" class="btn">Interjúkérdések</button>
-          </div>
-          <div id="advisoryOut" class="out"></div>
-          <div id="interviewOut" class="out"></div>
-        </section>
+          <section id="view-megkeresesek" class="view eng-view"></section>
 
-        <!-- COACH -->
-        <section class="stage" id="stage-coach">
-          <div class="stage-head"><h2>Coach — egy senior szemével</h2>
-            <p class="stage-sub">Egy senior itt mit csinált volna másképp? Egy fogás, amit ma bevethetsz.</p></div>
-          <div class="row">
-            <input id="coachCtx" class="brief-line" placeholder="Mit csináltál / hol akadtál el? (opcionális)" />
-            <button id="coachBtn" class="btn btn-primary">Kérj coachingot</button>
-          </div>
-          <div id="coachOut" class="out"></div>
+          <section id="view-ugyfel" class="view eng-view">
+            <div class="stage">
+              <div class="stage-head"><h2>Ügyfélegyeztetés</h2>
+                <p class="stage-sub">Felkészülés a hiring managerrel való egyeztetésre: tisztázandó briefpontok, piaci jelek, kockázatok.</p></div>
+              <div class="row"><button id="advisoryBtn" class="btn btn-primary">Egyeztetési javaslatok</button></div>
+              <div id="advisoryOut" class="out"></div>
+            </div>
+            <div class="stage" style="margin-top:16px">
+              <div class="stage-head"><h2>Interjúterv</h2>
+                <p class="stage-sub">Kompetencia-alapú kérdések: mit kérdezz, és mit jelez egy erős válasz.</p></div>
+              <div class="row"><button id="interviewBtn" class="btn btn-primary">Interjúterv készítése</button></div>
+              <div id="interviewOut" class="out"></div>
+            </div>
+          </section>
+
+          <section id="view-eredmenyek" class="view eng-view"></section>
+
+          <section id="view-jegyzetek" class="view eng-view"></section>
         </section>
 
         <div class="foot-space"></div>
@@ -184,14 +154,10 @@
     </main>
   </div>
 
-  <!-- Memory drawer -->
-  <div id="memDrawer" class="drawer hidden">
-    <div class="drawer-head"><h3>🧠 Projekt-memória</h3><button id="memClose" class="btn btn-ghost">✕</button></div>
-    <div class="row">
-      <input id="memNote" class="brief-line" placeholder="Jegyzet a projekthez / jelölthöz…" />
-      <button id="memSave" class="btn btn-primary">Mentés</button>
-    </div>
-    <div id="memList" class="mem-list"></div>
+  <!-- Jelölt részletes nézet (oldalsó panel) -->
+  <div id="candDrawer" class="drawer drawer-wide hidden">
+    <div class="drawer-head"><h3 id="candDrawerTitle">Jelölt</h3><button id="candDrawerClose" class="btn btn-ghost">✕</button></div>
+    <div id="candDrawerBody" class="drawer-body"></div>
   </div>
 
   <div id="toast" class="toast hidden"></div>

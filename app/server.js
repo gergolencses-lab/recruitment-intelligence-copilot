@@ -51,7 +51,7 @@ function getProj(req, res) {
   }
   const p = loadProject(req.params.id);
   if (!p) {
-    res.status(404).json({ error: `Nincs ilyen projekt: ${req.params.id}` });
+    res.status(404).json({ error: `Nincs ilyen megbízás: ${req.params.id}` });
     return null;
   }
   return p;
@@ -88,22 +88,33 @@ app.get("/api/project/:id", (req, res) => {
   if (p) res.json(p);
 });
 
-// 1) Intake
+// Megbízás-metaadatok mentése (pozíció, státusz, név) — a kliens szerkeszti.
+app.post("/api/project/:id/meta", A((req, res) => {
+  const p = getProj(req, res);
+  if (!p) return;
+  if (req.body.position) p.position = { ...(p.position || {}), ...req.body.position };
+  if (req.body.status) p.status = req.body.status;
+  if (req.body.name) p.name = req.body.name;
+  saveProject(p);
+  res.json({ ok: true, position: p.position, status: p.status, name: p.name });
+}));
+
+// 1) Brief elemzése
 app.post("/api/project/:id/intake", A(async (req, res) => {
   const p = getProj(req, res);
   if (!p) return;
   const brief = (req.body && req.body.brief) || "";
   p.brief_raw = brief;
-  p.intake = await ric.intakeReframe({ brief }, { projectId: p.id });
+  p.intake = await ric.intakeReframe({ brief, position: p.position }, { projectId: p.id });
   saveProject(p);
   res.json(p.intake);
 }));
 
-// 2) Query build
+// 2) Keresési terv
 app.post("/api/project/:id/query", A(async (req, res) => {
   const p = getProj(req, res);
   if (!p) return;
-  p.query = await ric.queryBuild({ intake: p.intake, brief: p.brief_raw }, { projectId: p.id });
+  p.query = await ric.queryBuild({ intake: p.intake, brief: p.brief_raw, position: p.position }, { projectId: p.id });
   saveProject(p);
   res.json(p.query);
 }));
@@ -122,11 +133,11 @@ app.post("/api/project/:id/discover", A(async (req, res) => {
   res.json(result);
 }));
 
-// 3b) Talent map
+// 3b) Célpiac-térkép
 app.post("/api/project/:id/talent-map", A(async (req, res) => {
   const p = getProj(req, res);
   if (!p) return;
-  p.talent_map = await ric.talentMap({ intake: p.intake, brief: p.brief_raw }, { projectId: p.id });
+  p.talent_map = await ric.talentMap({ intake: p.intake, brief: p.brief_raw, position: p.position }, { projectId: p.id });
   saveProject(p);
   res.json(p.talent_map);
 }));
@@ -189,7 +200,7 @@ app.post("/api/project/:id/outreach", A(async (req, res) => {
 app.post("/api/project/:id/advisory", A(async (req, res) => {
   const p = getProj(req, res);
   if (!p) return;
-  p.advisory = await ric.clientAdvisory({ intake: p.intake, brief: p.brief_raw }, { projectId: p.id });
+  p.advisory = await ric.clientAdvisory({ intake: p.intake, brief: p.brief_raw, position: p.position }, { projectId: p.id });
   saveProject(p);
   res.json(p.advisory);
 }));
@@ -197,7 +208,7 @@ app.post("/api/project/:id/advisory", A(async (req, res) => {
 app.post("/api/project/:id/interview", A(async (req, res) => {
   const p = getProj(req, res);
   if (!p) return;
-  p.interview = await ric.interviewIntel({ intake: p.intake, brief: p.brief_raw }, { projectId: p.id });
+  p.interview = await ric.interviewIntel({ intake: p.intake, brief: p.brief_raw, position: p.position }, { projectId: p.id });
   saveProject(p);
   res.json(p.interview);
 }));
@@ -220,7 +231,7 @@ app.post("/api/project/:id/art14", A((req, res) => {
   res.json(ric.art14Notice({ candidate: cand, controller: req.body.controller }, { projectId: p.id }));
 }));
 
-// Követés: "megérintve" — last_touched frissítése (hűlő szálak feloldása)
+// Követés: aktivitás rögzítése — last_touched frissítése
 app.post("/api/project/:id/touch", A((req, res) => {
   const p = getProj(req, res);
   if (!p) return;
@@ -240,6 +251,7 @@ app.post("/api/project/:id/outreach-status", A((req, res) => {
   if (!cand) return res.status(404).json({ error: "Nincs ilyen jelölt" });
   const cur = p.outreach_status[id] || {};
   if (req.body.status === "sent") cur.sent_at = cur.sent_at || new Date().toISOString();
+  if (req.body.status === "reviewed") cur.reviewed_at = cur.reviewed_at || new Date().toISOString();
   if (req.body.status === "reset") { delete p.outreach_status[id]; saveProject(p); return res.json({ ok: true, status: null }); }
   if (req.body.sentiment) { cur.replied = true; cur.replied_at = new Date().toISOString(); cur.sentiment = req.body.sentiment; }
   p.outreach_status[id] = cur;
@@ -283,11 +295,11 @@ app.get("/api/project/:id/memory", (req, res) => res.json(ric.memoryRecall({ pro
 // handlerként fut (api/index.js), ott NEM listen-elünk — az app-ot exportáljuk.
 if (!process.env.VERCEL) {
   app.listen(ric.config.port, () => {
-    const mode = ric.brainAvailable() ? "🟢 ÉLES (Claude)" : "🟡 DEMO (nincs kulcs)";
-    const reach = ric.reachLiveAvailable() ? "🟢 Firecrawl él" : "🟡 szintetikus pool";
-    console.log(`\n  Recruitment Intelligence Copilot`);
+    const mode = ric.brainAvailable() ? "🟢 AI elérhető (Claude)" : "🟡 Bemutató mód (nincs kulcs)";
+    const reach = ric.reachLiveAvailable() ? "🟢 nyilvános webes források" : "🟡 mintaadatok";
+    console.log(`\n  Recruitment Intelligence`);
     console.log(`  → http://localhost:${ric.config.port}`);
-    console.log(`  Agy: ${mode}  |  Elérés: ${reach}  |  modell: ${ric.config.model}\n`);
+    console.log(`  Mód: ${mode}  |  Adatforrás: ${reach}  |  modell: ${ric.config.model}\n`);
   });
 }
 

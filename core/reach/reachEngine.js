@@ -29,8 +29,8 @@ export async function discover({ searchQueries, source, onProgress }) {
       source: "synthetic",
       candidates,
       note:
-        "Szintetikus pool (senior tech / CEE). Nincs FIRECRAWL_API_KEY vagy source=synthetic. " +
-        "Élő discovery-hoz add meg a Firecrawl kulcsot a .env-ben.",
+        "Mintaadatok (senior tech / CEE) — nem valós személyek. " +
+        "Élő kutatáshoz a nyilvános webes forrás bekapcsolása szükséges (lásd Beállítások / telepítési útmutató).",
     };
   }
 
@@ -43,7 +43,7 @@ export async function discover({ searchQueries, source, onProgress }) {
     source: "firecrawl",
     candidates: persons,
     note:
-      `Firecrawl publikus-web discovery: ${persons.length} jelölt ${hits.length} találatból. ` +
-      "Nincs belépett/fake-account LinkedIn-scraping — a LinkedIn-URL-ek a keresőből, a mélység a scrapelhető publikus forrásokból (GitHub, cég-oldal, konferencia-bio, blog).",
+      `Nyilvános webes források: ${persons.length} jelölt ${hits.length} találatból. ` +
+      "Nincs belépett/fake-account LinkedIn-hozzáférés — a LinkedIn-URL-ek a keresőből, a mélység a nyilvánosan elérhető forrásokból (GitHub, cég-oldal, konferencia-bio, blog).",
   };
 }

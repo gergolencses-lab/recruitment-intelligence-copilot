@@ -57,7 +57,7 @@ async function baselineIntake(brief) {
     "BRIEF:\n" + brief +
     "\n\n---\nReturn ONLY one valid JSON object with these fields (Hungarian text values): " +
     '{"reframed_brief": string, "must_haves": string[], "nice_to_haves": string[], ' +
-    '"bad_brief_flags": string[], "hidden_requirements": string[], "search_hypotheses": string[]}. ' +
+    '"clarification_points": string[], "inferred_requirements": string[], "search_hypotheses": string[]}. ' +
     "No markdown, no code fence, no commentary.";
   const t0 = Date.now();
   const resp = await raw.messages.create({
