@@ -21,8 +21,8 @@
 
       <div class="side-label">Áttekintés</div>
       <nav class="steps">
-        <a href="#stage-overview" class="step" data-step="overview"><span class="dot"></span>Cockpit — napi</a>
-        <a href="#stage-proof" class="step" data-step="proof"><span class="dot"></span>Proof — bizonyíték</a>
+        <a href="#stage-overview" class="step" data-step="overview"><span class="dot"></span>Napi vezérlőpult</a>
+        <a href="#stage-proof" class="step" data-step="proof"><span class="dot"></span>Bizonyíték</a>
       </nav>
 
       <div class="side-label">Folyamat</div>
@@ -35,7 +35,7 @@
         <a href="#stage-coach" class="step" data-step="coach"><span class="dot"></span>Coach</a>
       </nav>
 
-      <div class="side-label">Projekt (kliens-silózott)</div>
+      <div class="side-label">Projekt (kliensenként külön)</div>
       <div class="side-block">
         <select id="projectSelect"></select>
         <div class="new-proj">
@@ -78,8 +78,7 @@
           <div>
             <div class="crumbs" id="crumbs">Nincs projekt kiválasztva</div>
             <h1 id="projTitle">Válassz vagy hozz létre projektet</h1>
-            <div class="page-sub">A teljes fejvadász-ív egy felületen — megtaláljuk a legjobbakat, és kidolgozzuk, hogyan szerezd meg őket.</div>
-          </div>
+            </div>
           <div class="head-actions">
             <button id="exportBtn" class="period-pill" title="Projekt exportálása JSON-ban">Export</button>
             <button id="memBtn" class="btn btn-primary" title="Projekt-memória">🧠 Memória</button>
@@ -117,7 +116,7 @@
         <!-- 2) DISCOVER -->
         <section class="stage" id="stage-discover">
           <div class="stage-head"><h2>Discover — passzív jelöltek felkutatása 📡</h2>
-            <p class="stage-sub">A Reach Engine publikus-web keresés + scraping. Élő módban Firecrawl (nincs belépett LinkedIn-scraping); kulcs nélkül szintetikus pool.</p></div>
+            <p class="stage-sub">Publikus webes keresés + scraping (élő módban Firecrawl, belépett LinkedIn-scraping nélkül). Kulcs nélkül minta-jelöltekkel fut.</p></div>
           <div class="row">
             <button id="queryBtn" class="btn">Keresési stratégia építése</button>
             <span class="src-toggle">forrás:
@@ -146,8 +145,8 @@
 
         <!-- ATTRACT (hero) -->
         <section class="stage stage-hero" id="stage-attract">
-          <div class="stage-head"><h2>Attract — bespoke elcsábítási stratégia ⭐</h2>
-            <p class="stage-sub">A termék szíve. Válassz célszemélyt: mi mozgatja, milyen szög, horog, timing, ajánlat, csatorna — és belőle személyre szabott megkereső-draft.</p></div>
+          <div class="stage-head"><h2>Attract — személyre szabott elcsábítási terv ⭐</h2>
+            <p class="stage-sub">Válassz célszemélyt. A terv megmondja: mi mozgatja, mivel szólítsd meg, mikor és melyik csatornán — belőle készül a személyre szabott megkereső.</p></div>
           <div class="row">
             <label>Célszemély:</label>
             <select id="attractCand"></select>
@@ -171,8 +170,8 @@
 
         <!-- COACH -->
         <section class="stage" id="stage-coach">
-          <div class="stage-head"><h2>Recruitment Coach — a differenciátor</h2>
-            <p class="stage-sub">Egy senior itt mit csinált volna másképp? A RIC nemcsak outputot ad, hanem fejleszt is.</p></div>
+          <div class="stage-head"><h2>Coach — egy senior szemével</h2>
+            <p class="stage-sub">Egy senior itt mit csinált volna másképp? Egy fogás, amit ma bevethetsz.</p></div>
           <div class="row">
             <input id="coachCtx" class="brief-line" placeholder="Mit csináltál / hol akadtál el? (opcionális)" />
             <button id="coachBtn" class="btn btn-primary">Kérj coachingot</button>

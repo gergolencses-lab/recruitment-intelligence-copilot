@@ -168,7 +168,7 @@ function renderOverview(p) {
   const hero = $("#ckHero"), stuck = $("#ckStuck"), cov = $("#ckCoverage");
   if (!p || !(p.candidates || []).length || !p.ranking) {
     st.innerHTML = "";
-    hero.innerHTML = `<div class="ov-empty">A cockpit a felkutatott + rangsorolt jelöltekből él. Menj végig: Intake → Discover → Rank — utána itt látod egy pillantással, kit üldözz ma, mi akad, és hol a piaci vak folt.</div>`;
+    hero.innerHTML = `<div class="ov-empty">Még nincs mit vezérelni. A sorrend: 1) Intake — illeszd be a briefet · 2) Discover — futtasd a felkutatást · 3) Rank — rangsoroltasd a jelölteket. Utána itt látod, ma kivel mit lépj.</div>`;
     stuck.innerHTML = ""; cov.innerHTML = "";
     renderProof(p); return;
   }
@@ -186,10 +186,10 @@ function renderCkStatus(p, d) {
   $("#ckStatus").innerHTML = `<div class="ck-status">
     <div class="ck-status-main">
       <div class="ck-status-num">${contactable}</div>
-      <div><div class="ck-status-lbl">most kontaktálható A-tier <span class="ck-hint">(van szög ÉS kész draft)</span></div>
-      <div class="ck-status-sub">${A.length} A-tier · ${blocked} blokkolt · ${cooling} hűl · keresés kora ${age == null ? "?" : age} nap</div></div>
+      <div><div class="ck-status-lbl">ma megkereshető „A” jelölt <span class="ck-hint">(kész elcsábítási terv + kész megkereső)</span></div>
+      <div class="ck-status-sub">„A” prioritás: ${A.length} · elakadva: ${blocked} · régóta nincs lépés: ${cooling} · a keresés ${age == null ? "?" : age} napja fut</div></div>
     </div>
-    <button class="ck-phase2" data-goto="proof">kimenet-mérés: ${sent}/${d.rows.length} kiküldve · Proof →</button>
+    <button class="ck-phase2" data-goto="proof">kiküldve: ${sent}/${d.rows.length} · Bizonyíték →</button>
   </div>`;
   const b = $("#ckStatus .ck-phase2"); if (b) b.onclick = () => $("#stage-proof").scrollIntoView({ behavior: "smooth" });
 }
@@ -197,11 +197,11 @@ function renderCkStatus(p, d) {
 function actionRow(r, coolDays) {
   const draftState = r.replied ? sentiChip(r.sentiment)
     : r.sent ? `<span class="chip good">kiküldve</span>`
-    : r.hasDraft ? `<span class="chip">draft kész</span>`
-    : r.hasAttr ? `<span class="chip warn">nincs draft</span>`
-    : `<span class="chip warn">nincs szög</span>`;
-  const cta = !r.hasAttr ? "⭐ Elcsábítás" : !r.hasDraft ? "Draft készítése" : "Draft megnyitása";
-  const cool = (r.touched != null && r.touched > coolDays) ? `<span class="ck-cool">· ${r.touched} napja nem érintve</span>` : "";
+    : r.hasDraft ? `<span class="chip">megkereső kész</span>`
+    : r.hasAttr ? `<span class="chip warn">nincs megkereső</span>`
+    : `<span class="chip warn">nincs terv</span>`;
+  const cta = !r.hasAttr ? "Terv készítése" : !r.hasDraft ? "Megkereső írása" : "Megkereső megnyitása";
+  const cool = (r.touched != null && r.touched > coolDays) ? `<span class="ck-cool">· ${r.touched} napja nincs lépés</span>` : "";
   let track = "";
   if (r.hasDraft && !r.sent) track = `<button class="ck-mini" data-act="sent" data-id="${r.id}">Kiküldve ✓</button>`;
   else if (r.sent && !r.replied) track = `<span class="ck-mini-lbl">válasz:</span><button class="ck-mini good" data-act="pozitív" data-id="${r.id}">+</button><button class="ck-mini warn" data-act="semleges" data-id="${r.id}">0</button><button class="ck-mini bad" data-act="negatív" data-id="${r.id}">−</button>`;
@@ -251,18 +251,18 @@ function openAttract(id) {
 
 function renderCkStuck(p, d) {
   const blockers = d.rows.map((r) => {
-    const need = !r.hasAttr ? { txt: "nincs elcsábítási szög", cta: "Elcsábítás" }
-      : !r.hasDraft ? { txt: "nincs outreach draft", cta: "Draft" }
+    const need = !r.hasAttr ? { txt: "hiányzik az elcsábítási terv", cta: "Terv" }
+      : !r.hasDraft ? { txt: "hiányzik a megkereső", cta: "Megkereső" }
       : (String(r.cand.art14_status || "").includes("pending") ? { txt: "GDPR Art.14 rendezetlen", cta: "Megnyit" } : null);
     return need ? { ...r, need } : null;
   }).filter(Boolean);
   const cooling = d.rows.filter((r) => r.hasAttr && !r.replied && (r.touched == null || r.touched > d.coolDays))
     .sort((a, b) => (b.touched == null ? 9999 : b.touched) - (a.touched == null ? 9999 : a.touched));
   const bHtml = blockers.length ? blockers.slice(0, 8).map((r) => `<div class="stuck-item"><span class="tier-badge tier-${r.tier} tb">${r.tier}</span><span class="stuck-name">${esc(r.cand.name || r.id)}</span><span class="stuck-need">${esc(r.need.txt)}</span><button class="btn stuck-cta" data-id="${r.id}">${r.need.cta}</button></div>`).join("") : `<div class="ov-empty sm">Nincs blokkolt A/B jelölt — mind mozgatható. 💪</div>`;
-  const cHtml = cooling.length ? cooling.slice(0, 8).map((r) => `<div class="stuck-item"><span class="stuck-days">${r.touched == null ? "—" : r.touched + "n"}</span><span class="stuck-name">${esc(r.cand.name || r.id)}</span><span class="stuck-need">${r.touched == null ? "még nem érintve" : "hűl"}</span><button class="btn stuck-cta touch" data-id="${r.id}">Megérintve</button></div>`).join("") : `<div class="ov-empty sm">Nincs hűlő szál — minden priorizált jelölt friss.</div>`;
+  const cHtml = cooling.length ? cooling.slice(0, 8).map((r) => `<div class="stuck-item"><span class="stuck-days">${r.touched == null ? "—" : r.touched + "n"}</span><span class="stuck-name">${esc(r.cand.name || r.id)}</span><span class="stuck-need">${r.touched == null ? "még nem volt lépés" : "nincs lépés"}</span><button class="btn stuck-cta touch" data-id="${r.id}">Léptem vele</button></div>`).join("") : `<div class="ov-empty sm">Nincs hűlő szál — minden priorizált jelölt friss.</div>`;
   $("#ckStuck").innerHTML = `<div class="stuck-grid">
     <div><div class="ck-sec-head sm"><h3>Ami blokkol</h3><span class="ck-sec-note">${blockers.length} jelölt akad egy hiányzó lépésen</span></div>${bHtml}</div>
-    <div><div class="ck-sec-head sm"><h3>Hűlő szálak</h3><span class="ck-sec-note">priorizált, de mozdulatlan</span></div>${cHtml}</div>
+    <div><div class="ck-sec-head sm"><h3>Hűlő szálak</h3><span class="ck-sec-note">rangsorolt, de nincs rajta lépés</span></div>${cHtml}</div>
   </div>`;
   $$("#ckStuck .stuck-cta").forEach((btn) => (btn.onclick = () => btn.classList.contains("touch") ? touchCand(btn.dataset.id) : openAttract(btn.dataset.id)));
 }
@@ -271,7 +271,7 @@ async function touchCand(id) {
   try {
     await api("POST", `/api/project/${state.projectId}/touch`, { candidateId: id });
     const cd = (state.project.candidates || []).find((x) => x.id === id); if (cd) cd.last_touched = new Date().toISOString();
-    renderOverview(state.project); toast("Megérintve — kikerült a hűlő szálakból.");
+    renderOverview(state.project); toast("Rögzítve — kikerült a hűlő szálak közül.");
   } catch (e) { toast("Hiba: " + e.message); }
 }
 
@@ -317,11 +317,11 @@ function renderProof(p) {
   const shortDays = (p.first_shortlist_at && p.created_at) ? Math.floor((new Date(p.first_shortlist_at) - new Date(p.created_at)) / 86400000) : null;
 
   const heroHtml = sent === 0
-    ? `<div class="proof-empty"><div class="proof-empty-num">0/${abRowCount(p)}</div><div class="proof-empty-lbl">célszemély kiküldve</div><p>A bizonyíték-szám — elcsábítás pozitív-válasz arány vs. Zita baseline-je — itt jelenik meg, amint a cockpitban „kiküldve"-nek jelölöd a megkereséseket és beérkezik a válasz. Kitalált számot sosem mutatunk.</p></div>`
+    ? `<div class="proof-empty"><div class="proof-empty-num">0/${abRowCount(p)}</div><div class="proof-empty-lbl">megkeresés kiküldve</div><p>A bizonyíték-szám — a megkeresések pozitív válaszaránya a saját kézi válaszarányodhoz képest — itt jelenik meg, amint a vezérlőpulton „Kiküldve”-t jelölsz és beérkezik a válasz. Kitalált számot sosem mutatunk.</p></div>`
     : `<div class="proof-compare">
-        <div class="proof-col"><div class="proof-big">${rate}%</div><div class="proof-cap">RIC elcsábítás<br>pozitív-válasz arány</div></div>
+        <div class="proof-col"><div class="proof-big">${rate}%</div><div class="proof-cap">RIC-megkeresések<br>pozitív válaszaránya</div></div>
         <div class="proof-vs">vs</div>
-        <div class="proof-col dim"><div class="proof-big">${base == null ? "—" : base + "%"}</div><div class="proof-cap">Zita baseline<br>(kézi outreach)</div></div>
+        <div class="proof-col dim"><div class="proof-big">${base == null ? "—" : base + "%"}</div><div class="proof-cap">saját baseline<br>(kézi megkeresés)</div></div>
         ${delta != null ? `<div class="proof-delta ${delta >= 0 ? "pos" : "neg"}">${delta >= 0 ? "+" : ""}${delta}pp</div>` : `<div class="proof-delta muted">add meg a baseline-t →</div>`}
       </div>
       <div class="proof-sample">${positive}/${sent} kiküldött célszemély reagált pozitívan${replied > positive ? ` · ${replied - positive} semleges/negatív` : ""}</div>`;
@@ -334,12 +334,12 @@ function renderProof(p) {
         ${shortDays != null ? `<div class="proof-mid">${shortDays} nap</div><div class="kpi-desc">cél: ≥30% gyorsulás a kézi módszerhez képest</div><button class="btn btn-ghost" id="proofShortClear" style="margin-top:6px">visszavonás</button>`
           : `<div class="proof-mid">${age == null ? "?" : age} napja fut</div><button class="btn" id="proofShortDone" style="margin-top:6px">Shortlist kész — jelöld most</button>`}
       </div>
-      <div class="card proof-metric"><div class="cov-label">Zita baseline válaszaránya</div>
+      <div class="card proof-metric"><div class="cov-label">Saját (kézi) válaszarány — baseline</div>
         <div class="proof-baseline-row"><input id="proofBaseline" class="brief-line" type="number" min="0" max="100" placeholder="%" value="${base == null ? "" : base}" style="max-width:100px"><button class="btn" id="proofBaselineSave">Mentés</button></div>
         <div class="kpi-desc">Egyszeri, kézzel — ehhez méri magát a pilot (önbevallás vagy korábbi ATS-export).</div>
       </div>
     </div>
-    <div class="note">Mérési horizont: a kiküldés/válasz a cockpit „kiküldve/válasz" jelöléséből épül (a rendszer nem küld). A teljes automata engagement/ATS Fázis 2. A szakaszidő-alapú konverzió akkor pontos, ha a szakaszváltások időbélyegzettek.</div>`;
+    <div class="note">A kiküldés/válasz adat a vezérlőpult jelöléseiből épül (a rendszer nem küld semmit). A teljes automata engagement/ATS Fázis 2. A szakaszidő-alapú konverzió akkor pontos, ha a szakaszváltások időbélyegzettek.</div>`;
 
   const bs = $("#proofBaselineSave"); if (bs) bs.onclick = async () => { const r = await api("POST", `/api/project/${state.projectId}/baseline`, { rate: $("#proofBaseline").value }); state.project.baseline_response_rate = r.baseline_response_rate; renderProof(state.project); toast("Baseline mentve."); };
   const sd = $("#proofShortDone"); if (sd) sd.onclick = async () => { const r = await api("POST", `/api/project/${state.projectId}/shortlist-done`, {}); state.project.first_shortlist_at = r.first_shortlist_at; renderProof(state.project); toast("Shortlist-idő rögzítve."); };
@@ -597,9 +597,9 @@ function renderAttract(o, cand) {
     </div>
     ${o.confidence ? `<div class="note">Konfidencia: ${esc(o.confidence)}</div>` : ""}
     <div class="row" style="margin-top:12px">
-      <label>Outreach nyelv:</label>
+      <label>Megkereső nyelve:</label>
       <select id="outLang"><option value="">auto</option><option value="en">angol</option><option value="hu">magyar</option></select>
-      <button id="outBtn" class="btn btn-primary">Outreach draft készítése</button>
+      <button id="outBtn" class="btn btn-primary">Megkereső megírása</button>
     </div>
   </div>`;
   $("#outBtn").onclick = (e) => withLoading(e.target, async () => {
@@ -611,7 +611,7 @@ function renderAttract(o, cand) {
 }
 function renderOutreach(o) {
   $("#outreachOut").innerHTML = `<div class="card">
-    <h4>Megkereső-draft ${demoTag(o)}</h4>
+    <h4>Megkereső (vázlat) ${demoTag(o)}</h4>
     <div class="mail">
       <div class="mail-head"><span class="mail-subj">${esc(o.subject || "(nincs tárgy)")}</span><button class="btn copy-btn" id="copyMail">Másolás</button></div>
       <div class="mail-body" id="mailBody">${esc(o.body || "")}</div>
