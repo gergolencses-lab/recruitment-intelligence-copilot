@@ -9,7 +9,7 @@ Ez egy **futtatható pilot** — nem mockup. Kulcs nélkül azonnal elindul (dem
 
 ## 🌐 Kipróbálható élesben (publikus link — Vercel)
 
-> **▶ Élő app:** _<ide kerül a Vercel-URL az első telepítés után>_
+> **▶ Élő app:** **https://recruitment-intelligence-copilot.vercel.app**
 
 Bárki megnyithatja és **valós Claude + Firecrawl** keresést futtathat rajta. A szerver a Vercelen fut serverless függvényként; a titkos kulcsok a Vercel env-változóiban élnek — **sosem a repóban, sosem a böngészőben.**
 
