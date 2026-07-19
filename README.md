@@ -26,6 +26,8 @@ Bárki megnyithatja és **valós Claude + Firecrawl** keresést futtathat rajta.
 5. Másold a kapott URL-t (`https://…vercel.app`) ide a README tetejére, és oszd meg akivel akarod.
 
 > ⚠️ **Éles kulcsok publikusan:** bárki, akinek elküldöd a linket, a te API-kulcsaidat használja. Beépített **rate-limit** véd (40 művelet / IP / 15 perc), de érdemes költségkeretet állítani az Anthropic/Firecrawl fióknál. Burn-kulcshoz ideális.
+>
+> ⏱️ **Válaszidő:** az éles Claude-műveletek ~20-40 mp-esek (a `vercel.json` 60 mp-re állítja a függvény-limitet — ez a Hobby-max). Az élő Firecrawl-felkutatás a leglassabb; ha 60 mp-nél tovább tartana, válts a `szintetikus` forrásra a Discovernél, vagy tedd Pro-ra a projektet.
 
 ---
 
