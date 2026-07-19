@@ -1,0 +1,77 @@
+{
+  "_doc": "RIC kiértékelési rubrika. Minden brief 4-6 előre-regisztrált, konkrét kritérium valós output-mezőkre. type: 'auto' = a runner gépiesen ellenőrzi; 'judge' = a vak LLM-bíró ítéli meg a kimenetből (a jegyzeteim nélkül). A 'must' a kritérium lényege, amit a bíró kap.",
+  "model_note": "A kritériumok szövege a bíró promptjába kerül; szándékosan NEM tartalmazza a brief teszt-jegyzeteit.",
+  "briefs": {
+    "01": {
+      "slug": "platform-engineer-budapest-startup",
+      "trap": "homály — 'rockstar / mindenhez ért', no-brand seed startup",
+      "lang": "hu",
+      "reach": "synthetic",
+      "advisory": true,
+      "criteria": [
+        { "id": "01-a", "type": "judge", "field": "intake.bad_brief_flags", "must": "Jelzi rossz-brief-jelként a homályos 'mindenhez ért / rockstar / mindent egyszerre' megfogalmazást." },
+        { "id": "01-b", "type": "judge", "field": "intake.hidden_requirements", "must": "Felismeri, hogy ez valójában két külön profil lehet: platform-BUILDER (Go operátor/controller) vs. DevOps-ÜZEMELTETŐ." },
+        { "id": "01-c", "type": "auto", "field": "intake.reframed_brief", "must": "A mezőértékek magyarul vannak (HU-input helyes kezelése)." },
+        { "id": "01-d", "type": "judge", "field": "attract.angle|attract.offer_levers", "must": "Az elcsábítás horga a founding-impact / zöldmezős platform / opció-story, NEM a (nemlétező) cégmárka." },
+        { "id": "01-e", "type": "judge", "field": "attract.confidence|attract.what_moves_them[].confidence", "must": "Őszinte a szintetikus jelölt vékony evidenciájáról — nem tesz úgy, mintha biztos tudná a drivereket." }
+      ]
+    },
+    "02": {
+      "slug": "staff-rust-backend-fintech-warsaw",
+      "trap": "unikornis-kombó + belső ellentmondás — 5+ év prod-Rust payments+distributed",
+      "lang": "en",
+      "reach": "firecrawl",
+      "advisory": false,
+      "criteria": [
+        { "id": "02-a", "type": "judge", "field": "intake.bad_brief_flags", "must": "Jelzi, hogy az '5+ év PRODUCTION Rust + payments + distributed' túlspecifikált / szűk pool / unikornis-igény." },
+        { "id": "02-b", "type": "judge", "field": "intake.hidden_requirements|intake.search_hypotheses", "must": "Adjacens poolt nyit: erős distributed-systems mérnök (C++/Go, event-sourcing, exactly-once), akit Rustra át lehet képezni — nem ragaszkodik a lehetetlen tökéletes matchhez." },
+        { "id": "02-c", "type": "judge", "field": "rank.ranked[].rationale", "must": "Az imperfekt (nem-tökéletes-Rust) jelölteket is rangsorolja érdemi indoklással — nem értékeli le csendben, no-reject szellemében." },
+        { "id": "02-d", "type": "judge", "field": "attract.angle|attract.hook", "must": "A horog a probléma izgalma (zöldmezős ledger, 10ms/20k TPS, formal methods), nem a fizetés." }
+      ]
+    },
+    "03": {
+      "slug": "data-platform-engineer-tallinn-mobility",
+      "trap": "félrecímke — 'Data Engineer' titulus, valójában streaming/distributed backend",
+      "lang": "en",
+      "reach": "firecrawl",
+      "advisory": false,
+      "criteria": [
+        { "id": "03-a", "type": "judge", "field": "intake.reframed_brief", "must": "Kimondja, hogy ez backend/streaming/distributed-systems szerep, NEM klasszikus SQL/dbt-analytics 'data engineer'." },
+        { "id": "03-b", "type": "judge", "field": "talent_map.target_companies[].likely_roles|talent_map.competitor_clusters", "must": "Streaming/platform/backend irányba térképez (Flink/Kafka/stateful services), NEM analytics-engineer / warehouse felé." },
+        { "id": "03-c", "type": "judge", "field": "query.target_titles|query.synonyms", "must": "A célcímek/szinonimák streaming-orientáltak (Streaming/Platform/Backend-Data, nem dbt/analytics)." },
+        { "id": "03-d", "type": "judge", "field": "discover.candidates", "must": "A felkutatott jelöltek inkább streaming/distributed/backend jelűek, nem SQL/BI-analytics profilok." }
+      ]
+    },
+    "04": {
+      "slug": "mlops-llmops-engineer-remote-cee",
+      "trap": "hype / buzzword-saláta — a valódi igény hab alá temetve",
+      "lang": "en",
+      "reach": "synthetic",
+      "advisory": false,
+      "criteria": [
+        { "id": "04-a", "type": "judge", "field": "intake.reframed_brief", "must": "Kihántja a hype alól a valódi igényt: megbízható model-serving + eval-keretrendszer + GPU-költséghatékonyság production LLM-hez." },
+        { "id": "04-b", "type": "judge", "field": "intake.bad_brief_flags", "must": "Jelzi a hype/túlspecifikáció ellentmondását (pl. '7+ év LLM production', 'rockstar 10x', category-defining közhelyek)." },
+        { "id": "04-c", "type": "judge", "field": "attract.angle|attract.hook", "must": "A forró piacon KONKRÉT technikai problémával/autonómiával differenciál — nem 'define the future of AI' típusú közhely." }
+      ]
+    },
+    "05": {
+      "slug": "manager-or-ic-fork-prague-healthtech",
+      "trap": "belső ellentmondás — menedzser + staff-IC + 60% kód egy emberben",
+      "lang": "en",
+      "reach": "synthetic",
+      "advisory": true,
+      "criteria": [
+        { "id": "05-a", "type": "judge", "field": "intake.bad_brief_flags", "must": "Jelzi, hogy a szerep-elvárások (embermenedzsment + legmélyebb IC + 60% kód + exec-komm + on-call + compliance) egy emberben nem férnek el." },
+        { "id": "05-b", "type": "judge", "field": "intake.reframed_brief|intake.hidden_requirements", "must": "Kimondja, hogy ez valójában KÉT különböző szerep/ember (Engineering Manager vs. Staff IC)." },
+        { "id": "05-c", "type": "judge", "field": "advisory.talking_points|advisory.watch_outs", "must": "A kliens-advisory javasolja a szerep kettévágását vagy a prioritás tisztázását (menedzser VAGY IC)." },
+        { "id": "05-d", "type": "auto", "field": "rank.ranked", "must": "A rangsor továbbra is teljes — minden jelölt szerepel (no-reject nem sérül)." }
+      ]
+    }
+  },
+  "cross_cutting": {
+    "no_reject_structural": "assertRankingComplete: minden discover-jelölt id-je megjelenik a rank.ranked[]-ben.",
+    "live_mode": "Minden LLM-capability kimenetén _mode==='live'.",
+    "evidence_grounding": "attract.evidence és what_moves_them[].evidence visszavezethető a jelölt tényleges signals[]-ára — nincs kitalált tény.",
+    "calibration": "attract.confidence (és per-driver confidence) arányos a valódi evidencia-erővel (szintetikus jelöltnél alacsonyabb)."
+  }
+}

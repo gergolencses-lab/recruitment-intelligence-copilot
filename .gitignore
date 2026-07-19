@@ -3,3 +3,6 @@ node_modules/
 data/
 *.log
 .DS_Store
+
+# Eval nyers kimenetek (élő Firecrawl valós-személy adatot tartalmazhat)
+eval/results/

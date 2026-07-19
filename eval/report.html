@@ -1,0 +1,259 @@
+<style>
+  :root {
+    --bg: #f6f7fb; --surface: #ffffff; --surface-2: #f0f2f8;
+    --ink: #1b1e28; --muted: #5c6273; --hair: #e2e5ee;
+    --accent: #4f46e5; --accent-soft: #eae9fd;
+    --good: #17803d; --good-bg: #e6f4ea;
+    --warn: #b45309; --warn-bg: #fbf0dd;
+    --crit: #c62a2a; --crit-bg: #fbe6e6;
+    --serif: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10121a; --surface: #191c27; --surface-2: #20242f;
+      --ink: #e9ebf4; --muted: #9aa0b4; --hair: #2b2f3d;
+      --accent: #8b87f5; --accent-soft: #23233a;
+      --good: #58c98a; --good-bg: #14271c;
+      --warn: #e6a94a; --warn-bg: #2b2110;
+      --crit: #f07474; --crit-bg: #2c1516;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10121a; --surface: #191c27; --surface-2: #20242f;
+    --ink: #e9ebf4; --muted: #9aa0b4; --hair: #2b2f3d;
+    --accent: #8b87f5; --accent-soft: #23233a;
+    --good: #58c98a; --good-bg: #14271c;
+    --warn: #e6a94a; --warn-bg: #2b2110;
+    --crit: #f07474; --crit-bg: #2c1516;
+  }
+  :root[data-theme="light"] {
+    --bg: #f6f7fb; --surface: #ffffff; --surface-2: #f0f2f8;
+    --ink: #1b1e28; --muted: #5c6273; --hair: #e2e5ee;
+    --accent: #4f46e5; --accent-soft: #eae9fd;
+    --good: #17803d; --good-bg: #e6f4ea;
+    --warn: #b45309; --warn-bg: #fbf0dd;
+    --crit: #c62a2a; --crit-bg: #fbe6e6;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans);
+    line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 40px 22px 72px; }
+  h1, h2, h3 { font-family: var(--serif); font-weight: 600; text-wrap: balance; line-height: 1.2; }
+  h1 { font-size: clamp(1.7rem, 5vw, 2.5rem); margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 { font-size: 1.35rem; margin: 44px 0 14px; padding-top: 18px; border-top: 1px solid var(--hair); }
+  h3 { font-size: 1.05rem; margin: 0 0 4px; font-family: var(--sans); font-weight: 700; }
+  p { margin: 0 0 12px; }
+  a { color: var(--accent); }
+  .eyebrow { font-family: var(--mono); font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 10px; }
+  .meta { font-family: var(--mono); font-size: .78rem; color: var(--muted); display: flex; flex-wrap: wrap;
+    gap: 6px 16px; margin: 14px 0 0; }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  .verdict { margin: 26px 0 0; background: var(--surface); border: 1px solid var(--hair);
+    border-left: 4px solid var(--accent); border-radius: 12px; padding: 20px 22px; }
+  .verdict .lead { font-family: var(--serif); font-size: 1.15rem; color: var(--ink); margin: 0 0 6px; }
+
+  ol.tldr { list-style: none; counter-reset: f; margin: 18px 0 0; padding: 0; display: grid; gap: 10px; }
+  ol.tldr li { counter-increment: f; position: relative; padding: 12px 14px 12px 46px; background: var(--surface);
+    border: 1px solid var(--hair); border-radius: 10px; font-size: .95rem; }
+  ol.tldr li::before { content: counter(f); position: absolute; left: 12px; top: 11px; width: 24px; height: 24px;
+    border-radius: 6px; display: grid; place-items: center; font-family: var(--mono); font-size: .8rem;
+    font-weight: 600; background: var(--accent-soft); color: var(--accent); }
+  ol.tldr li.crit { border-left: 3px solid var(--crit); }
+  ol.tldr li.warn { border-left: 3px solid var(--warn); }
+  ol.tldr li.good { border-left: 3px solid var(--good); }
+
+  .scroll { overflow-x: auto; margin: 8px 0 0; border: 1px solid var(--hair); border-radius: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; min-width: 560px; }
+  th, td { padding: 11px 13px; text-align: left; border-bottom: 1px solid var(--hair); }
+  th { font-family: var(--mono); font-size: .7rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600; background: var(--surface-2); }
+  td { background: var(--surface); }
+  tr:last-child td { border-bottom: none; }
+  td.b { font-weight: 600; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: .74rem;
+    font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .chip.good { background: var(--good-bg); color: var(--good); }
+  .chip.warn { background: var(--warn-bg); color: var(--warn); }
+  .chip.crit { background: var(--crit-bg); color: var(--crit); }
+  .chip.mute { background: var(--surface-2); color: var(--muted); }
+
+  .find { background: var(--surface); border: 1px solid var(--hair); border-radius: 12px; padding: 18px 20px;
+    margin: 12px 0 0; border-left: 4px solid var(--hair); }
+  .find.crit { border-left-color: var(--crit); }
+  .find.warn { border-left-color: var(--warn); }
+  .find.good { border-left-color: var(--good); }
+  .find .top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .find p { font-size: .93rem; margin: 0 0 8px; }
+  .find p:last-child { margin-bottom: 0; }
+  .quote { border-left: 2px solid var(--hair); padding: 2px 0 2px 12px; margin: 8px 0; color: var(--muted);
+    font-size: .88rem; }
+  ul.facts { margin: 6px 0 4px; padding-left: 18px; font-size: .88rem; color: var(--muted); }
+  ul.facts li { margin: 2px 0; }
+  ul.facts code { font-family: var(--mono); font-size: .82em; color: var(--ink); background: var(--surface-2);
+    padding: 1px 4px; border-radius: 4px; }
+
+  .backlog { display: grid; gap: 10px; margin-top: 8px; }
+  .lane { background: var(--surface); border: 1px solid var(--hair); border-radius: 10px; padding: 14px 16px; }
+  .lane .h { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+  .lane .tag { font-family: var(--mono); font-size: .72rem; font-weight: 700; padding: 2px 7px; border-radius: 5px; }
+  .lane.p0 .tag { background: var(--crit-bg); color: var(--crit); }
+  .lane.p1 .tag { background: var(--warn-bg); color: var(--warn); }
+  .lane.p2 .tag { background: var(--accent-soft); color: var(--accent); }
+  .lane.p3 .tag { background: var(--surface-2); color: var(--muted); }
+  .lane ul { margin: 0; padding-left: 18px; font-size: .9rem; }
+  .lane li { margin: 4px 0; }
+  .lane code { font-family: var(--mono); font-size: .82em; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }
+
+  .callout { background: var(--accent-soft); border: 1px solid transparent; border-radius: 12px; padding: 18px 20px;
+    margin-top: 8px; }
+  .callout h3 { font-family: var(--serif); }
+  .callout code { font-family: var(--mono); font-size: .84em; background: var(--surface); padding: 1px 5px;
+    border-radius: 4px; color: var(--ink); }
+  .callout ol { margin: 8px 0 0; padding-left: 20px; }
+  .callout li { margin: 6px 0; font-size: .92rem; }
+
+  .caveat { font-size: .82rem; color: var(--muted); margin-top: 8px; }
+  .caveat li { margin: 4px 0; }
+  footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--hair); font-family: var(--mono);
+    font-size: .74rem; color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Recruitment Intelligence Copilot · éles kiértékelés</p>
+  <h1>Elkapja a csapdát — de kitalál a jelöltről</h1>
+  <p style="font-size:1.05rem;color:var(--muted);max-width:60ch;">Öt szándékosan megtervezett fejvadász-brief, mindegyik egy előre bejelentett csapdával. A kérdés nem az volt, hogy „lefut-e", hanem hogy <b style="color:var(--ink)">jól, megbízhatóan és őszintén</b> végzi-e a munkát — és hol törik el.</p>
+  <div class="meta">
+    <span><b>2026-07-19</b></span><span>modell: <b>claude-sonnet-5</b></span>
+    <span>mód: <b>éles</b> (Agy + Firecrawl)</span><span>intake stabilitás: <b>N=3</b></span>
+    <span>rétegek: <b>auto · rubrika · vak bíró · szkeptikus · ember</b></span>
+  </div>
+
+  <div class="verdict">
+    <p class="lead">Demo-kész vezetett-gondolkodó eszközként — de még <b>nem</b> szabad rábízni, hogy valós, scrape-elt emberről automatikusan megkeresőt írjon.</p>
+    <p style="margin:0;color:var(--muted);font-size:.92rem;">A gondolkodó mag (intake→térkép→rangsor) erős és stabil. A „szíve" funkció, az elcsábítás, tényeket talál ki a jelöltről és túl magabiztos — ez az egy dolog, ami éles bevetésben kínos lenne. Előtte egy őszinteség-guardrail kell.</p>
+  </div>
+
+  <h2>A lényeg — öt találat</h2>
+  <ol class="tldr">
+    <li class="good"><b>Csapda-elkapás: erős.</b> 15/18 vak-bíró kritérium; az intake reframe pontos és stabil (3/3 konzisztens). Ez a termék működő magja.</li>
+    <li class="crit"><b>Attract = kitalál + túl magabiztos.</b> Tényeket gyárt a jelöltről (a #3-nál 6 kitalált tény egy emberről, akiről 1 adatunk van), és „közepes" konfidenciát ír, amikor „alacsony" lenne. <em>Ez hozná kínos helyzetbe Zitát.</em></li>
+    <li class="crit"><b>Élő reach = zaj a nehéz szerepeknél.</b> A #2 (Rust) 3 „jelöltjéből" 2 nem is ember (GitHub-repo). A szintetikus pool viszi a demót.</li>
+    <li class="warn"><b>Robusztusság: néma bukás.</b> A #5 rank egyetlen hibás JSON-tól elhalt, retry nélkül → a rangsor elveszett, a lánc csendben rossz jelöltre esett.</li>
+    <li class="warn"><b>A persona nem veri a nyers promptot az intake-nél.</b> 4/5 megoldott ablációból 3× a nyers modellt választotta a vak bíró. Az IP értéke nem az egyszeri reframe.</li>
+  </ol>
+
+  <h2>Scorecard</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Brief · csapda</th><th>Robusztus</th><th>Csapda-elkapás</th><th>Abláció</th><th>Kitalált tény</th></tr></thead>
+      <tbody>
+        <tr><td class="b">#1 · homály <span style="color:var(--muted)">(HU input)</span></td><td><span class="chip good">no-reject ✔ · HU ✔</span></td><td class="num">3/4</td><td><span class="chip warn">nyers</span></td><td class="num">2</td></tr>
+        <tr><td class="b">#2 · unikornis <span style="color:var(--muted)">(élő reach)</span></td><td><span class="chip good">✔ live</span></td><td class="num">3/4</td><td><span class="chip mute">—</span></td><td class="num">5</td></tr>
+        <tr><td class="b">#3 · félrecímke <span style="color:var(--muted)">(élő reach)</span></td><td><span class="chip good">✔ live</span></td><td class="num">4/4</td><td><span class="chip warn">nyers</span></td><td class="num">6</td></tr>
+        <tr><td class="b">#4 · hype</td><td><span class="chip good">✔ live</span></td><td class="num">2/3</td><td><span class="chip good">RIC</span></td><td class="num">4</td></tr>
+        <tr><td class="b">#5 · ellentmondás</td><td><span class="chip crit">rank elhalt</span></td><td class="num">3/3</td><td><span class="chip warn">nyers</span></td><td class="num">3</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="caveat">Abláció = a RIC-persona vs. egy dísztelen nyers-modell hívás ugyanazon a briefen, vakon bírálva (csak intake). „—" = megoldatlan, mert a nyers baseline maga is törött JSON-t adott (ez is adat: a törékenység modell-szintű).</p>
+
+  <h2>A találatok részletesen</h2>
+
+  <div class="find crit">
+    <div class="top"><span class="chip crit">P0 · őszinteség</span><h3>Az attract kitalál a jelöltről</h3></div>
+    <p>A „no reject, only attract" árnyoldala materializálódott: hogy mindenkit vonzóvá tegyen, a stratégia a brief ideálját <b>rávetíti a jelöltre</b>. A legélesebb a #3-nál, ahol egyetlen jel ismert (egy publikus konferencia-deck), mégis ezt állítja:</p>
+    <ul class="facts">
+      <li>„fraud és pricing rendszerek alatt dolgozott" — nincs rá jel</li>
+      <li>„staff-szintű döntési jogkör neki szánva" — a szerepéről (<code>company: null</code>) nincs adat</li>
+      <li>„tudatos szakmai brand-építő" — egyetlen slideshare-feltöltésből</li>
+    </ul>
+    <p>Kalibráció is rossz: a top-szintű <code>confidence</code> „közepes", miközben az evidencia egyetlen adatpont. <code>grounded=false, calibrated=false</code> (#1, #3 — kézzel igazolva). Minél véknyabb a valós jelölt, annál több a kitaláció.</p>
+  </div>
+
+  <div class="find crit">
+    <div class="top"><span class="chip crit">P0 · reach</span><h3>Élő felkutatás: zaj a nehéz szerepeknél</h3></div>
+    <p>A #2 (senior Rust/payments) élő Firecrawl-keresése 4 találatból 3 „jelöltet" adott, amiből <b>2 nem ember</b>: egy <code>dotfiles/emacs.d</code> és egy <code>vim-golf-challenges</code> repo — átcsúsztak az <code>is_person</code> szűrőn. A 3. valódi ember, de közösségi profil (Rust-meetup szervező), nem bizonyított staff-mérnök.</p>
+    <p>Ok: a senior passzív jelöltek LinkedInen vannak (belépve nem scrape-elünk); a publikus web repo-kat és cikkeket indexel, nem embereket. <b>A szintetikus pool tartja el a demót.</b></p>
+  </div>
+
+  <div class="find warn">
+    <div class="top"><span class="chip warn">P1 · robusztusság</span><h3>Néma bukás a #5 ranknél</h3></div>
+    <p>A rank <code>Expected ',' … position 2839</code> JSON-hibától elhalt. A parse nem tudta menteni, <b>nincs retry</b> → a teljes rangsor elveszett, és a lánc <b>csendben</b> a <code>candidates[0]</code>-ra esett vissza (nem a valódi topra). A UI ezt nem jelezné. Ugyanez a törékenység a #2 nyers-baseline-t is megölte → nem persona-specifikus, a JSON-kezelés hiánya.</p>
+  </div>
+
+  <div class="find good">
+    <div class="top"><span class="chip good">győztes</span><h3>Csapda-elkapás: a rendszer erőssége</h3></div>
+    <p>Az intake reframe pontos és stabil. Kiemelkedő a #3 (félrecímke), ahol pont az ellenkezőjét vártam — az eval megcáfolta a hipotézisemet:</p>
+    <p class="quote">„Ez nem Data Engineer szerep, hanem staff-szintű backend/distributed pozíció álcázva… a cím maga a probléma: analytics-engineer jelölteket vonz."</p>
+    <p>A talent-map is streaming/distributed felé térképez (Bolt → <em>Streaming Infrastructure Engineer</em>), nem analytics felé. A #5-nél az advisory helyesen javasolja a szerep kettévágását (EM vs. Staff-IC). Misszek: #1 nem mondja ki explicit a builder-vs-üzemeltető kettéválást; #4 nem nevesíti a hype alatti valódi igényt.</p>
+  </div>
+
+  <div class="find warn">
+    <div class="top"><span class="chip warn">stratégiai</span><h3>A persona nem veri a jó promptot az intake-nél</h3></div>
+    <p>Vak bíró, ugyanaz a modell, csak intake. <b>4/5 megoldott: 3× a nyers modell nyert (clear), 1× a RIC (#4).</b> A bíró indoka rendre: a nyers baseline több bad-brief-jelet és konkrétabb must-have-eket adott. A Knowledge Core értéke <b>nem</b> az egyszeri reframe — egy jól megírt, szándék-illesztett prompt ugyanoda ér.</p>
+    <p style="color:var(--muted);font-size:.88rem;">Fontos árnyalat: az abláció csak az intake-et méri. A RIC valódi differenciátora a <b>lánc</b> (evidencia-kötött discover→rank→attract), a <b>no-reject fegyelem</b> és a <b>termék-felület</b> — ezt az abláció nem teszteli.</p>
+  </div>
+
+  <h2>Fix-backlog</h2>
+  <div class="backlog">
+    <div class="lane p0"><div class="h"><span class="tag">P0</span><b>Őszinteség / biztonság — az attract előtt ne menjen éles emberre</b></div>
+      <ul>
+        <li><b>Evidencia-földelés:</b> minden <code>driver</code>/<code>evidence</code> KÖTELEZŐEN a jelölt tényleges <code>signals[]</code>-ára hivatkozzon. Új guardrail <code>assertEvidenceGrounded()</code> az <code>assertNoReject</code> mintájára, ami jelöli/kivágja a nem-visszavezethető állításokat.</li>
+        <li><b>Kalibráció:</b> ≤1 jel vagy egyforrású/közösségi jelölt → a <code>confidence</code> kényszerítetten „alacsony". A konfidencia az evidencia-erő függvénye legyen, ne a modell szeszélye.</li>
+        <li><b>is_person szűrő:</b> repo/dotfiles/archive/challenge URL → nem ember. Gyér lefedettségnél a rendszer jelezze („gyér publikus-web lefedettség"), ne prezentáljon zajt jelöltként.</li>
+      </ul>
+    </div>
+    <div class="lane p1"><div class="h"><span class="tag">P1</span><b>Robusztusság</b></div>
+      <ul>
+        <li><code>think()</code>: 1× retry JSON-parse-hibára + erősebb JSON-mentés. A lépés-hibát jelezd a UI-ban, ne ess csendben <code>candidates[0]</code>-ra.</li>
+      </ul>
+    </div>
+    <div class="lane p2"><div class="h"><span class="tag">P2</span><b>Minőség</b></div>
+      <ul>
+        <li>#1: az intake mondja ki explicit a builder-vs-üzemeltető kettéválást. #4: nevesítse a hype alatti valódi igényt (megbízható serving + eval + GPU-költség).</li>
+      </ul>
+    </div>
+    <div class="lane p3"><div class="h"><span class="tag">P3</span><b>Stratégiai</b></div>
+      <ul>
+        <li>Az intake-persona túl-mérnökölt egy jó prompthoz képest → az IP-energiát a differenciátorokra (attract-fegyelem, lánc-evidencia, no-reject enforcement) allokáld.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>Go / No-go — Zitához</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Capability</th><th>Állapot</th><th>Verdikt</th></tr></thead>
+      <tbody>
+        <tr><td class="b">Intake / query / talent-map</td><td>erős, stabil</td><td><span class="chip good">demo-kész</span></td></tr>
+        <tr><td class="b">Rank</td><td>működik, de néma bukás-mód</td><td><span class="chip warn">retry kell</span></td></tr>
+        <tr><td class="b">Attract</td><td>tényeket talál ki, túl-konfidens</td><td><span class="chip crit">P0-fix előbb</span></td></tr>
+        <tr><td class="b">Élő reach</td><td>zaj a nehéz szerepeknél</td><td><span class="chip warn">csak szintetikus demóra</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Spot-check — az emberi orákulum</h2>
+  <div class="callout">
+    <h3>Nézd meg ezt a kettőt te magad</h3>
+    <ol>
+      <li><b>A leghasznosabb:</b> <code>eval/results/03/attract-top.json</code> — olvasd el a 6 kitalált tényt egy valós Firecrawl-jelöltről, akiről egy deck az összes adat. <b>Kérdés:</b> ha erre építve mennél ki megkeresővel, kínos lenne?</li>
+      <li><b>Az abláció:</b> <code>eval/results/01/intake-runs.json</code> (RIC) vs. <code>eval/results/01/baseline-intake.json</code> (nyers) — érezd meg, tényleg hozzátesz-e a persona a sima prompthoz.</li>
+    </ol>
+  </div>
+
+  <h2>Módszertani fenntartások</h2>
+  <ul class="caveat">
+    <li><b>Saját házi kockázat:</b> én írtam a personát, a briefeket ÉS az elvárásokat. Ellensúly: vak bíró + adverzariális szkeptikus (a fabrikációkat kézzel igazoltam) + az abláció vak. De a bíró ugyanaz a modellcsalád (self-preference lehet).</li>
+    <li><b>Abláció:</b> csak intake, n=1, 4/5 megoldott. Irányadó, nem végleges. A lánc/termék-differenciátort nem méri.</li>
+    <li><b>Saját bíró-hibák (javítva):</b> a bíró max_tokens-e először csonkolt; a #2 nyers-baseline JSON-ja korrupt maradt → megoldatlan, de maga is adat.</li>
+  </ul>
+
+  <footer>RIC eval · 5 brief × teljes lánc · runner + vak bíró + szkeptikus · a nyers kimenetek: eval/results/ (gitignore-olt, valós-személy adat miatt)</footer>
+</div>
