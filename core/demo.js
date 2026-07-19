@@ -59,69 +59,76 @@ export const demo = {
   profileAssess: (input) => ({
     _demo: true,
     candidate_id: input && input.candidate_id,
+    fit: "erős",
+    fit_reason:
+      "A jelek payments-core productiont és OSS-karbantartást mutatnak — a szerep magja lefedve. A formális vezetés nyitott kérdés, de nem kizáró.",
     seniority_read:
-      "Valódi staff-szint: nem csak kódol, hanem rendszer-szintű döntéseket hoz és másokat emel. A payments-terhelés kezelése éles felelősség volt, nem hobbi.",
+      "Valódi staff-szint: rendszer-szintű döntéseket hoz és másokat emel. A payments-terhelés éles felelősség volt, nem hobbi.",
     fit_signals: [
       { signal: "Payments core productionben 3 év", strength: "erős", evidence: "headline + konferencia-téma" },
       { signal: "OSS idempotency-lib karbantartás", strength: "közepes", evidence: "GitHub" },
       { signal: "Craft Conf előadás skálázásról", strength: "közepes", evidence: "publikus program" },
     ],
     gaps_to_explore: [
-      "Vezetett-e formálisan csapatot, vagy csak technikai lead volt? — beszélgetésben tisztázni.",
-      "Mennyire volt on-call felelőssége? — nem kizáró, feltárandó.",
+      "Vezetett-e formálisan csapatot, vagy technikai lead volt? — beszélgetésben tisztázni.",
+      "Mennyire volt on-call felelőssége?",
     ],
-    standout: "A kombináció ritka: mély elosztott-rendszer + valós payments-tét + közösségi láthatóság.",
+    unknowns: ["Jelenlegi elégedettsége / vált-e szívesen", "Fizetési elvárás", "Remote vs. iroda preferencia"],
+    standout: "Ritka kombináció: mély elosztott-rendszer + valós payments-tét + közösségi láthatóság.",
     evidence: ["headline", "GitHub", "konferencia-program"],
-    note: "Ez NEM screening-döntés. Az üldözés inputja: hol erős, mit kell a beszélgetésben feltárni.",
   }),
 
   rankTargets: (input) => {
     const cands = (input && input.candidates) || [];
+    const n = cands.length;
     return {
       _demo: true,
       ranked: cands.map((c, i) => ({
         candidate_id: c.id,
         name: c.name,
         pursue_priority: i + 1,
-        tier: i < 3 ? "A — most üldözd" : i < 7 ? "B — párhuzamos" : "C — melegen tartsd",
+        tier:
+          i < 3 ? "A — most üldözd"
+          : i < 7 ? "B — párhuzamos"
+          : i < n - 2 ? "C — melegen tartsd"
+          : "D — nem éri meg",
         rationale:
-          i < 3
-            ? "Legerősebb evidencia + legjobb elérhetőség; itt a legmagasabb a válasz-esély."
-            : "Erős jel, de vagy gyengébb elérhetőség, vagy kevesebb megerősítő forrás — tartsd a pipeline-ban.",
-        evidence: (c.signals || []).slice(0, 2).map((s) => s.signal),
+          i < 3 ? "Legerősebb evidencia + jó elérhetőség; itt a legmagasabb a válasz-esély."
+          : i < n - 2 ? "Erős jel, de gyengébb elérhetőség vagy kevesebb megerősítő forrás."
+          : "A jelek gyengék vagy szerep-irrelevánsak — jelenleg nem éri meg üldözni.",
+        evidence: (c.signals || []).slice(0, 1).map((s) => s.signal),
       })),
-      note: "Ez ÜLDÖZÉSI prioritás, NEM elutasítás. Senki nem esik ki — mindenki kap helyet a sorban.",
+      note: "Őszinte üldözési prioritás — a D-tier evidencia alapján jelenleg nem éri meg.",
     };
   },
 
   attractionStrategy: (input) => ({
     _demo: true,
     candidate_id: input && input.candidate_id,
-    what_moves_them: [
-      { driver: "Technikai tét és tulajdon", evidence: "OSS-karbantartás + konferencia = szereti, ha a munkája látszik és számít", confidence: "közepes" },
-      { driver: "Scope-emelés (IC→lead átmenet)", evidence: "staff-szint, de nincs jel formális vezetésről → itt lehet neki új szint", confidence: "közepes" },
-      { driver: "Menekülés a láthatatlan karbantartó-munkától", evidence: "feltételezés — sok senior beragad legacy-be", confidence: "alacsony" },
+    grounded_read: {
+      known_facts: [
+        { fact: "Payments core rendszert vitt productionben", from_signal: "Payments core productionben 3 év" },
+        { fact: "Nyílt forrású idempotency-libet tart karban", from_signal: "OSS idempotency-lib karbantartás" },
+        { fact: "Konferencián adott elő skálázásról", from_signal: "Craft Conf előadás skálázásról" },
+      ],
+      unknowns: ["Mi motiválja (pénz / scope / tech) — nem tudjuk", "Mennyire elégedett a jelenlegi helyén", "Nyitott-e váltásra"],
+      confidence: "közepes",
+    },
+    attraction_ideas: [
+      {
+        rank: 1,
+        angle: "Tét, nem állás: 'a payments core, ami eldönti, hogy a cég skálázódik-e — a tiéd, és a csapat, amit köré formálsz.'",
+        hook: "A munkájára reflektálva: 'Láttam a skálázás-előadásod — pont ilyen fejjel keresünk valakit, aki eldönti, milyen legyen a rendszer, nem beáll egybe.'",
+        why_might_work: "A grounded jelek (OSS + konferencia) azt mutatják, szereti, ha a munkája látszik és számít — a scope+tulajdon üzenet erre épít. Spekuláció: a motiváció feltételezett.",
+        speculative: true,
+      },
+      { rank: 2, angle: "IC→lead scope-emelés, ha váltáskész.", why_might_work: "Staff-jel van, formális vezetésre nincs — lehet neki új szint. Spekulatív.", speculative: true },
+      { rank: 3, angle: "Menekülés a láthatatlan legacy-karbantartástól egy zöldmezős rendszerbe.", why_might_work: "Gyakori senior-frusztráció, de erre KONKRÉT jel nincs — a leggyengébb hipotézis.", speculative: true },
     ],
-    angle:
-      "Ne 'állást' kínálj neki, hanem TÉTET: 'a payments core, ami eldönti, hogy a cég skálázódik-e — a tiéd, és mellé csapat, amit te formálsz.' Ez a scope + tulajdon üzenet.",
-    hook:
-      "Egy mondat, ami a saját munkájára reflektál: 'Láttam a Craft-előadásod az idempotenciáról — pont ilyen fejjel keresünk valakit, aki nem beáll egy rendszerbe, hanem eldönti, milyen legyen.'",
-    timing:
-      "Most: friss tőkebevonás után a régiós fintechek mozgásban vannak, a 'mit építesz a következő 2 évben' kérdés nyitott. Ne várj a Q4-ig.",
-    offer_levers: [
-      "Staff→lead scope tisztán kiírva (nem homályos ígéret)",
-      "Architektúra-döntési jog az első naptól",
-      "Remote-first, aszinkron kultúra",
-      "Konferencia/OSS-idő intézményesítve (a láthatóságot, amit szeret)",
-    ],
-    channel:
-      "Első kör NE LinkedIn-InMail (zajos). Ha van közös ismerős vagy a konferencia-Q&A-ból warm szál → azon. Másodlagos: személyes, rövid e-mail, ami a munkájára reflektál.",
-    risks: [
-      "Ha sablonos megkeresést kap, azonnal kiesik a figyelme — a személyre szabás NEM opció.",
-      "Ha a scope-ígéret üresnek hat, egy senior azonnal átlát rajta.",
-    ],
-    evidence: ["konferencia-előadás", "OSS-profil", "seniority-jelek"],
-    confidence: "közepes — a driverek egy része feltételezés; az első beszélgetés validálja.",
+    recommended: 1,
+    channel: "Első kör NE LinkedIn-InMail (zajos). Ha van közös ismerős vagy warm szál a konferencia-Q&A-ból → azon. Másodlagos: rövid, személyes e-mail, ami a munkájára reflektál.",
+    timing: "Most: friss régiós tőkebevonások után a 'mit építesz a következő 2 évben' kérdés nyitott.",
+    risks: ["Sablonos megkeresés → azonnal kiesik a figyelme.", "Üres scope-ígéretet egy senior azonnal átlát."],
   }),
 
   outreachDraft: (input) => ({

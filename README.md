@@ -1,7 +1,7 @@
 # 🎯 Recruitment Intelligence Copilot (RIC)
 
 > **Egy közös mag, két felület.** Web-app (Surface A) + MCP-plugin (Surface B), ugyanarra a Capability API-ra kötve.
-> Fejvadász-copilot senior tech / CEE szerepekre. Termék-filozófia: **„no reject, only attract".**
+> Fejvadász-copilot senior tech / CEE szerepekre. Termék-filozófia: **evidencia-alapú őszinteség** — a jelöltről csak ellenőrzött tény, az elcsábítási ötletek nyíltan jelölt spekulációk.
 
 Ez egy **futtatható pilot** — nem mockup. Kulcs nélkül azonnal elindul (demo-mód, realisztikus HU minta-outputokkal); `ANTHROPIC_API_KEY` + `FIRECRAWL_API_KEY` megadásával **élesben** gondolkodik és **élő publikus-web scrapinget** végez.
 
@@ -81,14 +81,14 @@ A motor egy **tiszta interfész** (`core/reach/reachEngine.js`) mögött ül —
 
 ---
 
-## 🧭 „No reject, only attract" — kőbe vésve
+## 🧭 Evidencia-alapú őszinteség — kőbe vésve
 
-A rendszer **soha nem hoz hátrányos döntést a jelöltre.** Nincs „elutasít", „nem alkalmas", „kiszűr".
-- `profile_assess` = az üldözés inputja (hol erős, mit tárj fel), nem screening.
-- `rank_targets` = üldözési prioritás (A/B/C), **senki nem esik ki** — ezt a `core/guardrails.js` kódban is kikényszeríti.
-- `attraction_strategy` = a jelöltet **előnyben részesíti** (udvarol neki), nem sújtja.
+A legfontosabb szabály: a rendszer **a jelöltről csak ellenőrzött tényt állíthat** — amit a jeleiből (signals) evidenciálisan vissza lehet vezetni. Kitalált munkahely/szerep/motiváció TILOS.
+- `profile_assess` = **őszinte fit-ítélet** (erős / közepes / gyenge / nem fit), evidenciára építve — a rendszer kimondhatja, ha valaki nem fit.
+- `rank_targets` = őszinte üldözési prioritás (A/B/C/**D — nem éri meg**). Elszámoltathatóság: mindenki megjelenik a rangsorban (nem esik ki NÉMÁN), de a verdikt lehet elutasító — ezt a `core/guardrails.js` `assertRankingComplete` kényszeríti.
+- `attraction_strategy` = **két élesen elválasztott rész**: (1) *grounded read* — csak a jelekből visszavezethető tény, jel-hivatkozással + „amit nem tudunk" lista; (2) *attraction ideas* — 3 **nyíltan spekulatív** elcsábítási ötlet, versenyeztetve (a legjobb részletesen, kettő röviden). A `groundAttraction` guard kiszűri a nem-földelt állításokat.
 
-Ez veszi le a legnehezebb **AI Act / GDPR Art. 22** terhet (a veszélyzóna a *hátrányos automata döntés*). A scraping viszont **adatkezelővé** tesz → `art14_notice` generátor + provenance-tárolás a beépített válasz.
+A scraping **adatkezelővé** tesz → `art14_notice` generátor + provenance-tárolás a beépített válasz. Az őszinte fit-ítélet miatt a folyamat **emberi döntést** támogat (a recruiter dönt), nem automatizált elutasítást.
 
 ---
 

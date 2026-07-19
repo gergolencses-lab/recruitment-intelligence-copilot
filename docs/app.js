@@ -3,6 +3,38 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const state = { projectId: null, project: null, status: null };
 
+// ── Kliens-oldali projekt-tár (localStorage) ────────────────────────────
+// A szerver STATELESS (Vercel-kompatibilis): nincs szerveroldali lemez, a
+// projekt-állapot a böngészőben él, és minden művelethez elküldjük a body-ban.
+const LS_KEY = "ric.projects.v1";
+function lsAll() { try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch { return {}; } }
+function lsSave(p) {
+  if (!p || !p.id) return p;
+  const all = lsAll();
+  p.updated_at = new Date().toISOString();
+  all[p.id] = p;
+  try { localStorage.setItem(LS_KEY, JSON.stringify(all)); } catch (e) { toast("A böngésző tárhelye megtelt — törölj régi projektet."); }
+  return p;
+}
+function lsGet(id) { return lsAll()[id] || null; }
+function lsList() {
+  return Object.values(lsAll())
+    .map((p) => ({ id: p.id, name: p.name, updated_at: p.updated_at, candidates: (p.candidates || []).length, has_brief: !!p.intake }))
+    .sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || ""));
+}
+function persist() { if (state.project) lsSave(state.project); }
+function emptyProjectJS(id, name) {
+  return {
+    id, name: name || id,
+    created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    brief_raw: "", intake: null, query: null, candidates: [], talent_map: null,
+    assessments: {}, ranking: null, attraction: {}, outreach: {}, outreach_status: {},
+    baseline_response_rate: null, first_shortlist_at: null,
+    pilot: { cooling_days: 7, mono_source_threshold: 0.7 },
+    advisory: null, interview: null, coach_notes: [], memory: [], interactions: [],
+  };
+}
+
 function el(tag, cls, html) {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -20,6 +52,11 @@ function toast(msg) {
   toast._t = setTimeout(() => t.classList.add("hidden"), 2600);
 }
 async function api(method, path, body) {
+  // Projekt-műveletekhez a stateless szerver a kliens állapotából dolgozik:
+  // elküldjük a teljes projektet a body-ban.
+  if (method === "POST" && /^\/api\/project\/[^/]/.test(path) && state.project) {
+    body = { ...(body || {}), project: state.project };
+  }
   const res = await fetch(path, {
     method,
     headers: { "Content-Type": "application/json" },
@@ -70,7 +107,7 @@ async function loadStatus() {
 
 // ── PROJECTS ────────────────────────────────────────────
 async function loadProjects() {
-  const list = await api("GET", "/api/projects");
+  const list = lsList();
   const sel = $("#projectSelect");
   sel.innerHTML = `<option value="">— válassz projektet —</option>` +
     list.map((p) => `<option value="${esc(p.id)}">${esc(p.name)} (${p.candidates} jelölt)</option>`).join("");
@@ -86,7 +123,8 @@ async function selectProject(id) {
     renderOverview(null);
     return;
   }
-  const p = await api("GET", `/api/project/${encodeURIComponent(id)}`);
+  const p = lsGet(id);
+  if (!p) { toast("A projekt nem található ebben a böngészőben."); state.projectId = null; renderOverview(null); return; }
   state.project = p;
   $("#projTitle").textContent = p.name;
   $("#crumbs").textContent = `Projekt · ${p.id}`;
@@ -119,7 +157,7 @@ function polar(cx, cy, r, deg) {
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
 }
 function clamp5(x) { return Math.max(0, Math.min(5, x)); }
-function tierLetter(t) { const s = String(t || ""); return s.startsWith("A") ? "A" : s.startsWith("B") ? "B" : s.startsWith("C") ? "C" : "C"; }
+function tierLetter(t) { const s = String(t || ""); return s.startsWith("A") ? "A" : s.startsWith("B") ? "B" : s.startsWith("D") ? "D" : "C"; }
 function srcLabel(s) {
   return { linkedin: "LinkedIn", github: "GitHub", synthetic: "Szintetikus", web: "Web", blog: "Blog", community: "Közösség", xing: "Xing", stackoverflow: "StackOverflow", social: "Social", "egyéb": "Egyéb" }[s] || (s || "Egyéb");
 }
@@ -156,7 +194,7 @@ function cockpitModel(p) {
     return {
       id, cand, tier: tierLetter(r.tier), priority: r.pursue_priority,
       reason: (ass[id] && ass[id].standout) || shorten(r.rationale, 88),
-      hook: attr[id] && attr[id].hook, hasAttr: !!attr[id], hasDraft: !!out[id],
+      hook: attr[id] && attr[id].attraction_ideas && attr[id].attraction_ideas[0] && attr[id].attraction_ideas[0].hook, hasAttr: !!attr[id], hasDraft: !!out[id],
       sent: !!st.sent_at, replied: !!st.replied, sentiment: st.sentiment, touched: daysSince(cand.last_touched),
     };
   });
@@ -233,6 +271,7 @@ async function trackOutreach(id, act) {
     state.project.outreach_status = state.project.outreach_status || {};
     if (r.status) state.project.outreach_status[id] = r.status; else delete state.project.outreach_status[id];
     const cd = (state.project.candidates || []).find((x) => x.id === id); if (cd) cd.last_touched = new Date().toISOString();
+    persist();
     renderOverview(state.project);
   } catch (e) { toast("Hiba: " + e.message); }
 }
@@ -271,6 +310,7 @@ async function touchCand(id) {
   try {
     await api("POST", `/api/project/${state.projectId}/touch`, { candidateId: id });
     const cd = (state.project.candidates || []).find((x) => x.id === id); if (cd) cd.last_touched = new Date().toISOString();
+    persist();
     renderOverview(state.project); toast("Rögzítve — kikerült a hűlő szálak közül.");
   } catch (e) { toast("Hiba: " + e.message); }
 }
@@ -341,9 +381,9 @@ function renderProof(p) {
     </div>
     <div class="note">A kiküldés/válasz adat a vezérlőpult jelöléseiből épül (a rendszer nem küld semmit). A teljes automata engagement/ATS Fázis 2. A szakaszidő-alapú konverzió akkor pontos, ha a szakaszváltások időbélyegzettek.</div>`;
 
-  const bs = $("#proofBaselineSave"); if (bs) bs.onclick = async () => { const r = await api("POST", `/api/project/${state.projectId}/baseline`, { rate: $("#proofBaseline").value }); state.project.baseline_response_rate = r.baseline_response_rate; renderProof(state.project); toast("Baseline mentve."); };
-  const sd = $("#proofShortDone"); if (sd) sd.onclick = async () => { const r = await api("POST", `/api/project/${state.projectId}/shortlist-done`, {}); state.project.first_shortlist_at = r.first_shortlist_at; renderProof(state.project); toast("Shortlist-idő rögzítve."); };
-  const sc = $("#proofShortClear"); if (sc) sc.onclick = async () => { await api("POST", `/api/project/${state.projectId}/shortlist-done`, { clear: true }); state.project.first_shortlist_at = null; renderProof(state.project); };
+  const bs = $("#proofBaselineSave"); if (bs) bs.onclick = async () => { const r = await api("POST", `/api/project/${state.projectId}/baseline`, { rate: $("#proofBaseline").value }); state.project.baseline_response_rate = r.baseline_response_rate; persist(); renderProof(state.project); toast("Baseline mentve."); };
+  const sd = $("#proofShortDone"); if (sd) sd.onclick = async () => { const r = await api("POST", `/api/project/${state.projectId}/shortlist-done`, {}); state.project.first_shortlist_at = r.first_shortlist_at; persist(); renderProof(state.project); toast("Shortlist-idő rögzítve."); };
+  const sc = $("#proofShortClear"); if (sc) sc.onclick = async () => { await api("POST", `/api/project/${state.projectId}/shortlist-done`, { clear: true }); state.project.first_shortlist_at = null; persist(); renderProof(state.project); };
 }
 
 // Chart 1 — fél-donut gauge: jelöltek forrás szerint
@@ -532,6 +572,7 @@ function renderCandidates(cands, p) {
       renderAssessInline($(".assess-slot", card), out);
       state.project.assessments = state.project.assessments || {};
       state.project.assessments[c.id] = out;
+      persist();
       renderOverview(state.project);
     });
     $(".attract-btn", card).onclick = () => {
@@ -546,13 +587,16 @@ function renderCandidates(cands, p) {
   $("#attractCand").innerHTML = cands.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
 }
 function renderAssessInline(slot, o) {
+  const fit = String(o.fit || "").toLowerCase();
+  const fitChip = fit ? `<span class="chip ${fit.includes("nem") ? "crit" : fit === "erős" ? "good" : "warn"}">fit: ${esc(o.fit)}</span>` : "";
   slot.innerHTML = `<div class="card" style="margin-top:8px">
-    <h4>Senior-olvasat ${demoTag(o)}</h4>
+    <h4>Senior-olvasat ${fitChip} ${demoTag(o)}</h4>
+    ${o.fit_reason ? `<p>${esc(o.fit_reason)}</p>` : ""}
     <p><b>Seniority:</b> ${esc(o.seniority_read || "")}</p>
     ${(o.fit_signals || []).length ? `<div>${o.fit_signals.map((s) => `<div class="cand-sig"><span class="s">✓ ${esc(s.signal)} <span class="chip ${s.strength === "erős" ? "good" : "warn"}">${esc(s.strength)}</span></span></div>`).join("")}</div>` : ""}
-    ${(o.gaps_to_explore || []).length ? `<h4 style="margin-top:8px">Beszélgetésben feltárandó (nem kizáró)</h4>${list(o.gaps_to_explore)}` : ""}
+    ${(o.gaps_to_explore || []).length ? `<h4 style="margin-top:8px">Beszélgetésben feltárandó</h4>${list(o.gaps_to_explore)}` : ""}
+    ${(o.unknowns || []).length ? `<h4 style="margin-top:8px">Amit nem tudunk</h4>${(o.unknowns).map((u) => `<div class="flag">? ${esc(u)}</div>`).join("")}` : ""}
     ${o.standout ? `<p style="margin-top:6px"><b>Kiemelkedő:</b> ${esc(o.standout)}</p>` : ""}
-    <div class="note" style="margin-top:8px">${esc(o.note || "")}</div>
   </div>`;
 }
 
@@ -565,7 +609,7 @@ function renderTalent(o) {
 
 function renderRank(o) {
   const html = (o.ranked || []).map((r) => {
-    const tier = (r.tier || "").startsWith("A") ? "A" : (r.tier || "").startsWith("B") ? "B" : "C";
+    const tier = tierLetter(r.tier);
     return `<div class="rank-item tier-${tier}">
       <div class="rank-pos">${r.pursue_priority}</div>
       <div class="rank-body">
@@ -578,24 +622,39 @@ function renderRank(o) {
 }
 
 function renderAttract(o, cand) {
-  const drivers = (o.what_moves_them || []).map((d) => {
-    const cf = (d.confidence || "közepes").toLowerCase();
-    return `<div class="driver"><div class="driver-h">${esc(d.driver)}<span class="conf conf-${esc(cf)}">${esc(d.confidence || "")}</span></div><div class="driver-e">${esc(d.evidence || "")}</div></div>`;
-  }).join("");
+  const gr = o.grounded_read || {};
+  const facts = (gr.known_facts || []).map((f) =>
+    `<div class="driver"><div class="driver-h">${esc(f.fact || "")}</div>${f.from_signal ? `<div class="driver-e">🔗 ${esc(f.from_signal)}</div>` : ""}</div>`
+  ).join("") || `<div class="note">Nincs a jelekből visszavezethető tény — ez önmagában jelzés.</div>`;
+  const ideas = (o.attraction_ideas || []).slice().sort((a, b) => (a.rank || 9) - (b.rank || 9));
+  const best = ideas[0];
+  const rest = ideas.slice(1);
+  const bestHtml = best ? `<div class="idea idea-best">
+      <div class="driver-h">Ötlet #1 — ajánlott <span class="chip warn">spekuláció</span></div>
+      <div class="angle">${esc(best.angle || "")}</div>
+      ${best.hook ? `<div class="attract-hook">🪝 „${esc(best.hook)}”</div>` : ""}
+      ${best.why_might_work ? `<div class="driver-e">Miért működhet: ${esc(best.why_might_work)}</div>` : ""}
+    </div>` : "";
+  const restHtml = rest.length ? `<div style="margin-top:8px"><h4>További ötletek (röviden)</h4>${rest.map((i) =>
+      `<div class="driver"><div class="driver-h">#${i.rank || "?"} — ${esc(i.angle || "")}</div>${i.why_might_work ? `<div class="driver-e">${esc(i.why_might_work)}</div>` : ""}</div>`
+    ).join("")}</div>` : "";
   $("#attractOut").innerHTML = `<div class="card attract-hero">
-    <h4>⭐ Elcsábítási stratégia — ${esc(cand ? cand.name : "")} ${demoTag(o)}</h4>
-    <div class="angle">${esc(o.angle || "")}</div>
-    ${o.hook ? `<div class="attract-hook">🪝 „${esc(o.hook)}”</div>` : ""}
+    <h4>⭐ Elcsábítási terv — ${esc(cand ? cand.name : "")} ${demoTag(o)}</h4>
     <div class="attract-grid">
-      <div><h4>Mi mozgatja</h4>${drivers}</div>
       <div>
-        <h4>Timing</h4><p>${esc(o.timing || "")}</p>
+        <h4>Amit BIZTOSAN tudunk <span class="chip good">tény</span></h4>${facts}
+        ${(gr.unknowns || []).length ? `<h4 style="margin-top:8px">Amit NEM tudunk</h4>${(gr.unknowns).map((u) => `<div class="flag">? ${esc(u)}</div>`).join("")}` : ""}
+        ${gr.confidence ? `<div class="note">Tény-konfidencia: ${esc(gr.confidence)}</div>` : ""}
+      </div>
+      <div>
+        <h4>Elcsábítási ötletek <span class="chip warn">spekuláció</span></h4>
+        ${bestHtml}${restHtml}
         <h4 style="margin-top:8px">Csatorna</h4><p>${esc(o.channel || "")}</p>
-        <h4 style="margin-top:8px">Ajánlati karok</h4>${chips(o.offer_levers)}
-        ${(o.risks || []).length ? `<h4 style="margin-top:8px">⚠️ Mi taszítaná el</h4>${(o.risks || []).map((r) => `<div class="flag">${esc(r)}</div>`).join("")}` : ""}
+        ${o.timing ? `<h4 style="margin-top:8px">Timing</h4><p>${esc(o.timing)}</p>` : ""}
+        ${(o.risks || []).length ? `<h4 style="margin-top:8px">⚠️ Mi taszítaná el</h4>${(o.risks).map((r) => `<div class="flag">${esc(r)}</div>`).join("")}` : ""}
       </div>
     </div>
-    ${o.confidence ? `<div class="note">Konfidencia: ${esc(o.confidence)}</div>` : ""}
+    ${gr._stripped_ungrounded ? `<div class="note">🛡️ ${gr._stripped_ungrounded} nem-visszavezethető állítás automatikusan kiszűrve (evidencia-földelés).</div>` : ""}
     <div class="row" style="margin-top:12px">
       <label>Megkereső nyelve:</label>
       <select id="outLang"><option value="">auto</option><option value="en">angol</option><option value="hu">magyar</option></select>
@@ -605,6 +664,7 @@ function renderAttract(o, cand) {
   $("#outBtn").onclick = (e) => withLoading(e.target, async () => {
     const out = await api("POST", `/api/project/${state.projectId}/outreach`, { candidateId: cand.id, language: $("#outLang").value || undefined });
     if (state.project) { state.project.outreach = state.project.outreach || {}; state.project.outreach[cand.id] = out; }
+    persist();
     renderOutreach(out);
     renderOverview(state.project);
   });
@@ -653,7 +713,8 @@ $("#newProjBtn").onclick = async () => {
   const raw = $("#newProjId").value.trim();
   if (!raw) return toast("Adj meg egy projekt-azonosítót.");
   const id = raw.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  await api("POST", "/api/project", { id, name: raw });
+  if (!id) return toast("Érvénytelen azonosító.");
+  if (!lsGet(id)) lsSave(emptyProjectJS(id, raw));
   $("#newProjId").value = "";
   await loadProjects();
   $("#projectSelect").value = id;
@@ -663,28 +724,40 @@ $("#newProjBtn").onclick = async () => {
 $("#projectSelect").onchange = (e) => selectProject(e.target.value);
 
 $("#intakeBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
+  state.project.brief_raw = $("#briefInput").value;
   const out = await api("POST", `/api/project/${state.projectId}/intake`, { brief: $("#briefInput").value });
   state.project.intake = out;
+  persist();
   renderIntake(out);
   toast("Brief megtámadva.");
 });
 $("#queryBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
-  renderQuery(await api("POST", `/api/project/${state.projectId}/query`));
+  const q = await api("POST", `/api/project/${state.projectId}/query`);
+  state.project.query = q;
+  persist();
+  renderQuery(q);
 });
 $("#discoverBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
   const out = await api("POST", `/api/project/${state.projectId}/discover`, { source: $("#sourceSel").value });
-  state.project = await api("GET", `/api/project/${state.projectId}`);
+  state.project.candidates = out.candidates;
+  state.project.discover_note = out.note;
+  state.project.discover_source = out.source;
+  persist();
   renderCandidates(out.candidates, state.project);
   $("#discoverNote").innerHTML = `<div class="note">${esc(out.note)}</div>`;
   renderOverview(state.project);
   toast(`${out.candidates.length} jelölt felkutatva (${out.source}).`);
 });
 $("#talentBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
-  renderTalent(await api("POST", `/api/project/${state.projectId}/talent-map`));
+  const t = await api("POST", `/api/project/${state.projectId}/talent-map`);
+  state.project.talent_map = t;
+  persist();
+  renderTalent(t);
 });
 $("#rankBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
   const r = await api("POST", `/api/project/${state.projectId}/rank`);
   if (state.project) state.project.ranking = r;
+  persist();
   renderRank(r);
   renderOverview(state.project);
 });
@@ -694,28 +767,45 @@ $("#attractBtn").onclick = (e) => needProject() && withLoading(e.target, async (
   const cand = (state.project.candidates || []).find((c) => c.id === id);
   const out = await api("POST", `/api/project/${state.projectId}/attract`, { candidateId: id });
   if (state.project) { state.project.attraction = state.project.attraction || {}; state.project.attraction[id] = out; }
+  persist();
   renderAttract(out, cand);
   $("#outreachOut").innerHTML = "";
   renderOverview(state.project);
 });
-$("#advisoryBtn").onclick = (e) => needProject() && withLoading(e.target, async () => renderAdvisory(await api("POST", `/api/project/${state.projectId}/advisory`)));
-$("#interviewBtn").onclick = (e) => needProject() && withLoading(e.target, async () => renderInterview(await api("POST", `/api/project/${state.projectId}/interview`)));
+$("#advisoryBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
+  const a = await api("POST", `/api/project/${state.projectId}/advisory`);
+  state.project.advisory = a;
+  persist();
+  renderAdvisory(a);
+});
+$("#interviewBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
+  const iv = await api("POST", `/api/project/${state.projectId}/interview`);
+  state.project.interview = iv;
+  persist();
+  renderInterview(iv);
+});
 $("#coachBtn").onclick = (e) => needProject() && withLoading(e.target, async () => {
-  renderCoach(await api("POST", `/api/project/${state.projectId}/coach`, { context: $("#coachCtx").value }));
+  const out = await api("POST", `/api/project/${state.projectId}/coach`, { context: $("#coachCtx").value });
+  state.project.coach_notes = state.project.coach_notes || [];
+  state.project.coach_notes.push({ ts: new Date().toISOString(), ...out });
+  persist();
+  renderCoach(out);
 });
 
 // Memory drawer
 $("#memBtn").onclick = async () => {
   if (!needProject()) return;
   $("#memDrawer").classList.remove("hidden");
-  const m = await api("GET", `/api/project/${state.projectId}/memory`);
-  $("#memList").innerHTML = (m.memory || []).slice().reverse().map((e) => `<div class="mem-entry"><div class="t">${esc(e.ts)} · ${esc(e.kind)}</div>${esc(e.note)}</div>`).join("") || `<div class="empty">Még nincs jegyzet.</div>`;
+  const mem = (state.project && state.project.memory) || [];
+  $("#memList").innerHTML = mem.slice().reverse().map((e) => `<div class="mem-entry"><div class="t">${esc(e.ts)} · ${esc(e.kind)}</div>${esc(e.note)}</div>`).join("") || `<div class="empty">Még nincs jegyzet.</div>`;
 };
 $("#memClose").onclick = () => $("#memDrawer").classList.add("hidden");
 $("#memSave").onclick = async () => {
   const note = $("#memNote").value.trim();
   if (!note) return;
-  await api("POST", `/api/project/${state.projectId}/memory`, { note });
+  state.project.memory = state.project.memory || [];
+  state.project.memory.push({ ts: new Date().toISOString(), kind: "note", note });
+  persist();
   $("#memNote").value = "";
   $("#memBtn").click();
   toast("Mentve a projekt-memóriába.");
@@ -758,7 +848,7 @@ $$(".stage").forEach((s) => obs.observe(s));
 (async () => {
   await loadStatus();
   await loadProjects();
-  const list = await api("GET", "/api/projects");
+  const list = lsList();
   if (list.length) {
     $("#projectSelect").value = list[0].id;
     await selectProject(list[0].id);

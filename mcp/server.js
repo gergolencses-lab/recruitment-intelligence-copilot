@@ -36,7 +36,7 @@ const TOOLS = [
   },
   {
     name: "profile_assess",
-    description: "🧠 Senior-olvasat egy jelöltről, evidenciával. FONTOS: ez NEM screening-döntés és NEM elutasítás — az üldözés inputja (hol erős, mit tárj fel a beszélgetésben). A 'gap' feltárandó kérdés, sosem kizáró ok.",
+    description: "🧠 Őszinte fit-olvasat egy jelöltről, KIZÁRÓLAG a jeleiből visszavezethető evidenciával. Kimondja, mennyire fit (erős/közepes/gyenge/nem fit) — akár elutasító is lehet. Amit a jelekből nem tudni, az 'unknowns'-ba kerül; kitalált tény tilos.",
     inputSchema: { type: "object", properties: { candidate: OBJ, intake: OBJ }, required: ["candidate"] },
     run: (a) => ric.profileAssess({ candidate: a.candidate, intake: a.intake }),
   },

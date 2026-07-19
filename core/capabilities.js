@@ -5,7 +5,7 @@
 import { think, brainAvailable } from "./llm.js";
 import { demo } from "./demo.js";
 import { audit } from "./audit.js";
-import { assertNoReject, assertRankingComplete } from "./guardrails.js";
+import { assertRankingComplete, groundAttraction } from "./guardrails.js";
 import { discover as reachDiscover } from "./reach/reachEngine.js";
 
 function J(obj) {
@@ -78,37 +78,39 @@ Kimeneti JSON séma:
   return run("talentMap", { task, input, demoInput: { intake } }, projectId);
 }
 
-// ── 🧠 PROFILE ASSESSMENT (üldözés inputja, NEM screening) ────
+// ── 🧠 PROFILE ASSESSMENT (őszinte fit-olvasat) ──────────────
 export async function profileAssess({ candidate, intake }, { projectId } = {}) {
-  const task = `FELADAT: Senior-olvasat egy jelöltről, evidenciával. EZ NEM SCREENING-DÖNTÉS és NEM elutasítás — az üldözés inputja: hol erős, mit kell a beszélgetésben feltárni. A "gap" nálad "feltárandó kérdés", sosem kizáró ok.
+  const task = `FELADAT: Senior-olvasat egy jelöltről, KIZÁRÓLAG a jeleiből visszavezethető evidenciával. Mondd ki ŐSZINTÉN, mennyire fit a szerepre (erős/közepes/gyenge/nem fit) — indoklással. NE találj ki tényt: amit a jelekből nem tudsz róla, tedd az "unknowns"-ba.
 Kimeneti JSON séma:
 {
  "candidate_id": "${candidate && candidate.id}",
+ "fit": "erős|közepes|gyenge|nem fit",
+ "fit_reason": "<miért ez a fit — evidenciára építve, egy-két mondat>",
  "seniority_read": "...",
- "fit_signals": [ { "signal": "...", "strength": "erős|közepes|gyenge", "evidence": "<forrás>" } ],
- "gaps_to_explore": ["<beszélgetésben feltárandó, NEM kizáró>"],
- "standout": "<mi teszi ritkává>",
- "evidence": ["<források>"],
- "note": "Nem screening-döntés; az üldözés inputja."
+ "fit_signals": [ { "signal": "...", "strength": "erős|közepes|gyenge", "evidence": "<a jel, amiből származik>" } ],
+ "gaps_to_explore": ["<beszélgetésben feltárandó pont>"],
+ "unknowns": ["<amit a jelekből NEM tudunk a jelöltről>"],
+ "standout": "<mi teszi ritkává, ha bármi>",
+ "evidence": ["<a felhasznált jelek>"]
 }`;
   const input = `JELÖLT:\n${J(candidate)}\n\nSZEREP-KONTEXTUS:\n${J(intake || {})}`;
   return run(
     "profileAssess",
-    { task, input, demoInput: { candidate_id: candidate && candidate.id }, guard: (o) => assertNoReject(o, "profileAssess") },
+    { task, input, demoInput: { candidate_id: candidate && candidate.id } },
     projectId
   );
 }
 
-// ── 🧠 TARGET RANKING (üldözésre, sosem reject) ──────────────
+// ── 🧠 TARGET RANKING (őszinte prioritás, akár elutasítás) ───
 export async function rankTargets({ candidates, intake }, { projectId } = {}) {
   const ids = (candidates || []).map((c) => c.id);
-  const task = `FELADAT: Rangsorold a jelölteket ÜLDÖZÉSRE — kit hajszolj és milyen sorrendben. SENKI NEM ESIK KI. Ez nem elutasítás, hanem prioritás: mindenki kap helyet a sorban (A: most, B: párhuzamos, C: melegen tartsd).
-FONTOS: a "ranked" tömbnek MINDEN bemeneti jelöltet tartalmaznia kell.
-TÖMÖRSÉG (kötelező): ez egy gyors üldözési sor, NEM mély elemzés. A "rationale" EGYETLEN rövid mondat (max ~12 szó). Az "evidence" legfeljebb 1 rövid elem (vagy üres tömb). Ne írj bekezdéseket — a részletes elemzés az Assess/Attract dolga.
+  const task = `FELADAT: Rangsorold a jelölteket a szerephez — kit érdemes üldözni és milyen sorrendben, és kit NEM. Őszinte prioritás: a gyenge/nem-fit jelölt is kap helyet, de a "D — nem éri meg" tier-ben, indoklással. A verdikt LEHET elutasító, ha az evidencia ezt támasztja alá.
+ELSZÁMOLTATHATÓSÁG: a "ranked" tömb MINDEN bemeneti jelöltet tartalmazzon — senki nem eshet ki NÉMÁN (de kaphat D-tiert).
+TÖMÖRSÉG (kötelező): gyors sor, NEM mély elemzés. A "rationale" EGYETLEN rövid mondat (max ~12 szó). Az "evidence" legfeljebb 1 rövid elem (vagy üres tömb).
 Kimeneti JSON séma:
 {
- "ranked": [ { "candidate_id": "...", "name": "...", "pursue_priority": 1, "tier": "A — most üldözd|B — párhuzamos|C — melegen tartsd", "rationale": "<egy rövid mondat>", "evidence": ["<max 1 elem>"] } ],
- "note": "Üldözési prioritás, NEM elutasítás."
+ "ranked": [ { "candidate_id": "...", "name": "...", "pursue_priority": 1, "tier": "A — most üldözd|B — párhuzamos|C — melegen tartsd|D — nem éri meg", "rationale": "<egy rövid mondat>", "evidence": ["<max 1 elem>"] } ],
+ "note": "Őszinte üldözési prioritás — a D-tier evidencia alapján nem éri meg."
 }`;
   const input = `JELÖLTEK:\n${J((candidates || []).map((c) => ({ id: c.id, name: c.name, headline: c.headline, signals: c.signals })))}\n\nSZEREP:\n${J(intake || {})}`;
   return run(
@@ -120,38 +122,49 @@ Kimeneti JSON séma:
       // akkor is, ha sok (10+) jelöltet kell egy hívásban rangsorolni.
       maxTokens: 4000,
       demoInput: { candidates },
-      guard: (o) => {
-        assertNoReject(o, "rankTargets");
-        assertRankingComplete(ids, o.ranked || []);
-        return o;
-      },
+      // No-reject guard MEGSZŰNT; az elszámoltathatóság (senki nem esik ki némán) marad.
+      guard: (o) => assertRankingComplete(ids, o.ranked || []),
     },
     projectId
   );
 }
 
-// ── ⭐ ATTRACTION STRATEGY (a termék szíve) ──────────────────
+// ── ⭐ ATTRACTION STRATEGY ────────────────────────────────────
+// KÉT ÉLESEN ELVÁLASZTOTT rész: (1) grounded_read = amit a jelöltről BIZTOSAN
+// tudunk (csak a jeleiből, jel-hivatkozással); (2) attraction_ideas = 3 spekulatív
+// elcsábítási ötlet, versenyeztetve, jelölve. A guard kiszűri a nem-földelt tényt.
 export async function attractionStrategy({ candidate, assessment, intake }, { projectId } = {}) {
-  const task = `FELADAT: Készíts BESPOKE elcsábítási stratégiát EGY top célszemélyre. A kérdés sosem "megfelel-e", hanem "HOGYAN nyerjük meg". Fejtsd ki: mi mozgatja (evidenciával + konfidenciával), a szög, a horog (egy konkrét nyitómondat-ötlet a saját munkájára reflektálva), a timing, az ajánlati kar(ok), a csatorna, és a kockázatok (mi taszítaná el).
+  const task = `FELADAT: Készíts elcsábítási tervet EGY célszemélyre, KÉT ÉLESEN ELVÁLASZTOTT részben.
+
+(1) GROUNDED READ — amit a jelöltről BIZTOSAN tudunk. CSAK a jeleiből (signals) evidenciálisan visszavezethető tény. MINDEN fact mellé idézd a jelet, amiből ered ("from_signal"). Amit NEM tudsz (motiváció, fizetés, cégméret, jelenlegi elégedettség, jövőterv), az az "unknowns"-ba megy. Kitalált tény a személyről SZIGORÚAN TILOS.
+
+(2) ATTRACTION IDEAS — pontosan 3 elcsábítási ötlet, amit MAGADBAN VERSENYEZTETSZ. Ezek szükségszerűen SPEKULATÍVAK (a jelölt fejét nem ismerjük) — a "speculative": true jelöli. Rangsorold: rank 1 = a legjobb, részletesen (szög + horog + miért működhet); rank 2-3 RÖVIDEN. Az ötletek a grounded jelekből induljanak ki, de bátrak lehetnek.
+
 Kimeneti JSON séma:
 {
  "candidate_id": "${candidate && candidate.id}",
- "what_moves_them": [ { "driver": "...", "evidence": "...", "confidence": "alacsony|közepes|magas" } ],
- "angle": "<a fő pozicionálás — tét, nem állás>",
- "hook": "<egy konkrét nyitómondat-ötlet, a jelölt saját munkájára reflektálva>",
- "timing": "<miért most>",
- "offer_levers": ["<mit tegyél az asztalra>"],
+ "grounded_read": {
+   "known_facts": [ { "fact": "<csak a jelekből visszavezethető tény>", "from_signal": "<idézd a jelet, amiből ered>" } ],
+   "unknowns": ["<amit a jelekből NEM tudunk: motiváció, fizetés, elégedettség...>"],
+   "confidence": "alacsony|közepes|magas"
+ },
+ "attraction_ideas": [
+   { "rank": 1, "angle": "<a fő megközelítés — tét, nem állás>", "hook": "<konkrét nyitómondat-ötlet a munkájára reflektálva>", "why_might_work": "<mire épít a hipotézis>", "speculative": true },
+   { "rank": 2, "angle": "<röviden>", "why_might_work": "<röviden>", "speculative": true },
+   { "rank": 3, "angle": "<röviden>", "why_might_work": "<röviden>", "speculative": true }
+ ],
+ "recommended": 1,
  "channel": "<legjobb csatorna + miért>",
- "risks": ["<mi taszítaná el egy seniornál>"],
- "evidence": ["<források>"],
- "confidence": "<összegző konfidencia + mi validálja>"
+ "timing": "<miért most, ha van rá jel>",
+ "risks": ["<mi taszíthatná el egy seniornál>"]
 }`;
   const input = `JELÖLT:\n${J(candidate)}\n\nÉRTÉKELÉS:\n${J(assessment || {})}\n\nSZEREP:\n${J(intake || {})}`;
   return run(
     "attractionStrategy",
     // 4000 backstop: a tömörség-direktívával a tényleges kimenet jóval ez alatt van,
     // így a serverless 60s limit alatt marad, csonkolás nélkül.
-    { task, input, demoInput: { candidate_id: candidate && candidate.id }, maxTokens: 4000, guard: (o) => assertNoReject(o, "attractionStrategy") },
+    // Guard: a nem a jelekből visszavezethető "known_facts" kiszűrése (evidencia-földelés).
+    { task, input, demoInput: { candidate_id: candidate && candidate.id }, maxTokens: 4000, guard: (o) => groundAttraction(o, candidate) },
     projectId
   );
 }

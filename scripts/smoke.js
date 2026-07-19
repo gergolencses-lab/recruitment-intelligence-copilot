@@ -23,13 +23,14 @@ console.log(`   forrás=${disc.source}, jelöltek=${disc.candidates.length}`);
 
 const cand = disc.candidates[0];
 const assess = await ric.profileAssess({ candidate: cand, intake });
-ok("profileAssess → note (no-reject framing)", !!assess.note);
+ok("profileAssess → fit (őszinte ítélet)", !!assess.fit);
 
 const rank = await ric.rankTargets({ candidates: disc.candidates, intake });
-ok("rankTargets → mindenki benne (no-reject)", (rank.ranked || []).length === disc.candidates.length);
+ok("rankTargets → mindenki elszámolva", disc.candidates.every((c) => (rank.ranked || []).some((r) => r.candidate_id === c.id)));
 
 const attract = await ric.attractionStrategy({ candidate: cand, assessment: assess, intake });
-ok("attractionStrategy → angle + hook", !!attract.angle && !!attract.hook);
+ok("attractionStrategy → grounded_read + attraction_ideas", !!(attract.grounded_read && Array.isArray(attract.attraction_ideas) && attract.attraction_ideas.length));
+ok("attract → ötletek spekulatívnak jelölve", (attract.attraction_ideas || []).length > 0 && (attract.attraction_ideas || []).every((i) => i.speculative === true));
 
 const outreach = await ric.outreachDraft({ candidate: cand, attraction: attract });
 ok("outreachDraft → body", !!outreach.body);
@@ -37,14 +38,16 @@ ok("outreachDraft → body", !!outreach.body);
 const coach = await ric.recruitmentCoach({ context: "A recruiter a briefet szó szerint végrehajtotta." });
 ok("recruitmentCoach → one_lever_now", !!coach.one_lever_now);
 
-// Guardrail negatív teszt: reject-verdikt tiltott
-try {
-  const { assertNoReject } = await import("../core/guardrails.js");
-  assertNoReject({ decision: "elutasít" }, "test");
-  ok("guardrail no-reject dob", false);
-} catch {
-  ok("guardrail no-reject dob", true);
-}
+// Guardrail teszt: evidencia-földelés kiszűri a nem-visszavezethető ("kitalált") tényt
+const { assertGrounded } = await import("../core/guardrails.js");
+const g = assertGrounded(
+  [
+    { fact: "Fraud rendszereken dolgozott", from_signal: "kitalált fraud tapasztalat" },
+    { fact: "Kubernetes operátort írt", from_signal: "Kubernetes operátort írt Go-ban" },
+  ],
+  [{ signal: "Kubernetes operátort írt Go-ban" }]
+);
+ok("guardrail földelés: kitalált tény kiszűrve, földelt megmarad", g.stripped_count === 1 && g.kept.length === 1);
 
 // Memory
 ric.memorySave({ projectId: "smoke-proj", projectName: "Smoke", note: "Teszt-jegyzet" });

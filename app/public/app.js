@@ -157,7 +157,7 @@ function polar(cx, cy, r, deg) {
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
 }
 function clamp5(x) { return Math.max(0, Math.min(5, x)); }
-function tierLetter(t) { const s = String(t || ""); return s.startsWith("A") ? "A" : s.startsWith("B") ? "B" : s.startsWith("C") ? "C" : "C"; }
+function tierLetter(t) { const s = String(t || ""); return s.startsWith("A") ? "A" : s.startsWith("B") ? "B" : s.startsWith("D") ? "D" : "C"; }
 function srcLabel(s) {
   return { linkedin: "LinkedIn", github: "GitHub", synthetic: "Szintetikus", web: "Web", blog: "Blog", community: "Közösség", xing: "Xing", stackoverflow: "StackOverflow", social: "Social", "egyéb": "Egyéb" }[s] || (s || "Egyéb");
 }
@@ -194,7 +194,7 @@ function cockpitModel(p) {
     return {
       id, cand, tier: tierLetter(r.tier), priority: r.pursue_priority,
       reason: (ass[id] && ass[id].standout) || shorten(r.rationale, 88),
-      hook: attr[id] && attr[id].hook, hasAttr: !!attr[id], hasDraft: !!out[id],
+      hook: attr[id] && attr[id].attraction_ideas && attr[id].attraction_ideas[0] && attr[id].attraction_ideas[0].hook, hasAttr: !!attr[id], hasDraft: !!out[id],
       sent: !!st.sent_at, replied: !!st.replied, sentiment: st.sentiment, touched: daysSince(cand.last_touched),
     };
   });
@@ -587,13 +587,16 @@ function renderCandidates(cands, p) {
   $("#attractCand").innerHTML = cands.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
 }
 function renderAssessInline(slot, o) {
+  const fit = String(o.fit || "").toLowerCase();
+  const fitChip = fit ? `<span class="chip ${fit.includes("nem") ? "crit" : fit === "erős" ? "good" : "warn"}">fit: ${esc(o.fit)}</span>` : "";
   slot.innerHTML = `<div class="card" style="margin-top:8px">
-    <h4>Senior-olvasat ${demoTag(o)}</h4>
+    <h4>Senior-olvasat ${fitChip} ${demoTag(o)}</h4>
+    ${o.fit_reason ? `<p>${esc(o.fit_reason)}</p>` : ""}
     <p><b>Seniority:</b> ${esc(o.seniority_read || "")}</p>
     ${(o.fit_signals || []).length ? `<div>${o.fit_signals.map((s) => `<div class="cand-sig"><span class="s">✓ ${esc(s.signal)} <span class="chip ${s.strength === "erős" ? "good" : "warn"}">${esc(s.strength)}</span></span></div>`).join("")}</div>` : ""}
-    ${(o.gaps_to_explore || []).length ? `<h4 style="margin-top:8px">Beszélgetésben feltárandó (nem kizáró)</h4>${list(o.gaps_to_explore)}` : ""}
+    ${(o.gaps_to_explore || []).length ? `<h4 style="margin-top:8px">Beszélgetésben feltárandó</h4>${list(o.gaps_to_explore)}` : ""}
+    ${(o.unknowns || []).length ? `<h4 style="margin-top:8px">Amit nem tudunk</h4>${(o.unknowns).map((u) => `<div class="flag">? ${esc(u)}</div>`).join("")}` : ""}
     ${o.standout ? `<p style="margin-top:6px"><b>Kiemelkedő:</b> ${esc(o.standout)}</p>` : ""}
-    <div class="note" style="margin-top:8px">${esc(o.note || "")}</div>
   </div>`;
 }
 
@@ -606,7 +609,7 @@ function renderTalent(o) {
 
 function renderRank(o) {
   const html = (o.ranked || []).map((r) => {
-    const tier = (r.tier || "").startsWith("A") ? "A" : (r.tier || "").startsWith("B") ? "B" : "C";
+    const tier = tierLetter(r.tier);
     return `<div class="rank-item tier-${tier}">
       <div class="rank-pos">${r.pursue_priority}</div>
       <div class="rank-body">
@@ -619,24 +622,39 @@ function renderRank(o) {
 }
 
 function renderAttract(o, cand) {
-  const drivers = (o.what_moves_them || []).map((d) => {
-    const cf = (d.confidence || "közepes").toLowerCase();
-    return `<div class="driver"><div class="driver-h">${esc(d.driver)}<span class="conf conf-${esc(cf)}">${esc(d.confidence || "")}</span></div><div class="driver-e">${esc(d.evidence || "")}</div></div>`;
-  }).join("");
+  const gr = o.grounded_read || {};
+  const facts = (gr.known_facts || []).map((f) =>
+    `<div class="driver"><div class="driver-h">${esc(f.fact || "")}</div>${f.from_signal ? `<div class="driver-e">🔗 ${esc(f.from_signal)}</div>` : ""}</div>`
+  ).join("") || `<div class="note">Nincs a jelekből visszavezethető tény — ez önmagában jelzés.</div>`;
+  const ideas = (o.attraction_ideas || []).slice().sort((a, b) => (a.rank || 9) - (b.rank || 9));
+  const best = ideas[0];
+  const rest = ideas.slice(1);
+  const bestHtml = best ? `<div class="idea idea-best">
+      <div class="driver-h">Ötlet #1 — ajánlott <span class="chip warn">spekuláció</span></div>
+      <div class="angle">${esc(best.angle || "")}</div>
+      ${best.hook ? `<div class="attract-hook">🪝 „${esc(best.hook)}”</div>` : ""}
+      ${best.why_might_work ? `<div class="driver-e">Miért működhet: ${esc(best.why_might_work)}</div>` : ""}
+    </div>` : "";
+  const restHtml = rest.length ? `<div style="margin-top:8px"><h4>További ötletek (röviden)</h4>${rest.map((i) =>
+      `<div class="driver"><div class="driver-h">#${i.rank || "?"} — ${esc(i.angle || "")}</div>${i.why_might_work ? `<div class="driver-e">${esc(i.why_might_work)}</div>` : ""}</div>`
+    ).join("")}</div>` : "";
   $("#attractOut").innerHTML = `<div class="card attract-hero">
-    <h4>⭐ Elcsábítási stratégia — ${esc(cand ? cand.name : "")} ${demoTag(o)}</h4>
-    <div class="angle">${esc(o.angle || "")}</div>
-    ${o.hook ? `<div class="attract-hook">🪝 „${esc(o.hook)}”</div>` : ""}
+    <h4>⭐ Elcsábítási terv — ${esc(cand ? cand.name : "")} ${demoTag(o)}</h4>
     <div class="attract-grid">
-      <div><h4>Mi mozgatja</h4>${drivers}</div>
       <div>
-        <h4>Timing</h4><p>${esc(o.timing || "")}</p>
+        <h4>Amit BIZTOSAN tudunk <span class="chip good">tény</span></h4>${facts}
+        ${(gr.unknowns || []).length ? `<h4 style="margin-top:8px">Amit NEM tudunk</h4>${(gr.unknowns).map((u) => `<div class="flag">? ${esc(u)}</div>`).join("")}` : ""}
+        ${gr.confidence ? `<div class="note">Tény-konfidencia: ${esc(gr.confidence)}</div>` : ""}
+      </div>
+      <div>
+        <h4>Elcsábítási ötletek <span class="chip warn">spekuláció</span></h4>
+        ${bestHtml}${restHtml}
         <h4 style="margin-top:8px">Csatorna</h4><p>${esc(o.channel || "")}</p>
-        <h4 style="margin-top:8px">Ajánlati karok</h4>${chips(o.offer_levers)}
-        ${(o.risks || []).length ? `<h4 style="margin-top:8px">⚠️ Mi taszítaná el</h4>${(o.risks || []).map((r) => `<div class="flag">${esc(r)}</div>`).join("")}` : ""}
+        ${o.timing ? `<h4 style="margin-top:8px">Timing</h4><p>${esc(o.timing)}</p>` : ""}
+        ${(o.risks || []).length ? `<h4 style="margin-top:8px">⚠️ Mi taszítaná el</h4>${(o.risks).map((r) => `<div class="flag">${esc(r)}</div>`).join("")}` : ""}
       </div>
     </div>
-    ${o.confidence ? `<div class="note">Konfidencia: ${esc(o.confidence)}</div>` : ""}
+    ${gr._stripped_ungrounded ? `<div class="note">🛡️ ${gr._stripped_ungrounded} nem-visszavezethető állítás automatikusan kiszűrve (evidencia-földelés).</div>` : ""}
     <div class="row" style="margin-top:12px">
       <label>Megkereső nyelve:</label>
       <select id="outLang"><option value="">auto</option><option value="en">angol</option><option value="hu">magyar</option></select>

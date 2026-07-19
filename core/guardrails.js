@@ -1,62 +1,72 @@
-// Guardrail-réteg: a "no reject, only attract" strukturális garanciája + PII-minimalizálás.
-// A promptok is tiltják az elutasítást; ez a második védővonal, ami kódban is kikényszeríti.
-
-const REJECT_WORDS = [
-  "elutasít", "elutasitas", "elutasítás", "reject", "disqualif", "kiszűr", "kiszur",
-  "kizár", "kizar", "nem alkalmas", "alkalmatlan", "screen out", "screen-out", "screened out",
-];
-
-// Mezőnevek, amikben tilos "reject" jellegű verdiktnek megjelennie.
-const VERDICT_FIELDS = ["verdict", "decision", "recommendation", "dontes", "döntés", "ajanlas", "ajánlás"];
+// Guardrail-réteg: evidencia-földelés + elszámoltathatóság + PII-minimalizálás.
+// A "no reject" doktrína MEGSZŰNT — a rendszer őszintén mondhatja, hogy valaki nem fit.
+// A tét most az ELLENKEZŐJE: a rendszer nem állíthat KITALÁLT tényt a jelöltről.
 
 /**
- * Strukturális no-reject ellenőrzés. Ha egy verdikt-mező elutasítást tartalmaz,
- * hibát dobunk — a rendszer sosem szállíthat ki hátrányos döntést.
- */
-export function assertNoReject(output, ctx = "") {
-  const walk = (node, keyPath) => {
-    if (node == null) return;
-    if (typeof node === "string") {
-      const key = keyPath[keyPath.length - 1] || "";
-      const isVerdictField = VERDICT_FIELDS.some((f) => key.toLowerCase().includes(f));
-      if (isVerdictField) {
-        const low = node.toLowerCase();
-        if (REJECT_WORDS.some((w) => low.includes(w))) {
-          throw new Error(
-            `GUARDRAIL[no-reject]: elutasítás-jellegű verdikt tiltott (${ctx} @ ${keyPath.join(".")}): "${node}"`
-          );
-        }
-      }
-      return;
-    }
-    if (Array.isArray(node)) {
-      node.forEach((v, i) => walk(v, [...keyPath, String(i)]));
-      return;
-    }
-    if (typeof node === "object") {
-      for (const [k, v] of Object.entries(node)) walk(v, [...keyPath, k]);
-    }
-  };
-  walk(output, []);
-  return output;
-}
-
-/**
- * Rangsor-garancia: a rankTargets SOHA nem dobhat el jelöltet.
- * Minden bemeneti jelöltnek szerepelnie kell a kimeneti rangsorban.
+ * Elszámoltathatóság: a rank NEM ejthet el csendben jelöltet — mindenkinek meg
+ * kell jelennie a kimeneti rangsorban (akár "nem éri meg / kizárva" verdikttel is).
+ * Ez nem "no reject" — ez anti-néma-bukás: a modell számoljon el minden jelölttel.
  */
 export function assertRankingComplete(candidateIds, ranked) {
   const rankedIds = new Set((ranked || []).map((r) => r.candidate_id));
   const missing = candidateIds.filter((id) => !rankedIds.has(id));
   if (missing.length) {
     throw new Error(
-      `GUARDRAIL[no-reject]: a rangsorból hiányzik ${missing.length} jelölt — üldözési prioritást KELL kapniuk, nem eshetnek ki: ${missing.join(", ")}`
+      `GUARDRAIL[accountability]: a rangsorból hiányzik ${missing.length} jelölt — mindenkit el kell számolni (akár elutasítva), nem eshetnek ki némán: ${missing.join(", ")}`
     );
   }
   return ranked;
 }
 
-// Special-category jelzők — ha bármelyik felbukkanna, kiszűrjük a tárolásból/kimenetből.
+// ── Evidencia-földelés ───────────────────────────────────────────────
+// Az attract "known_facts" mezőjéből kiszűri azokat az állításokat, amelyek NEM
+// vezethetők vissza a jelölt egyetlen jelére sem. Így a stratégia nem állíthat
+// kitalált tényt a személyről. (Második védővonal a prompt mögött.)
+function tokens(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 4);
+}
+
+/**
+ * @param {Array} knownFacts - [{ fact, from_signal }]
+ * @param {Array} signals - a jelölt tényleges jelei ([{signal}] vagy [string])
+ * @returns {{ kept: Array, stripped: Array, stripped_count: number }}
+ */
+export function assertGrounded(knownFacts, signals) {
+  const facts = Array.isArray(knownFacts) ? knownFacts : [];
+  const sigTokens = (signals || [])
+    .map((s) => (typeof s === "string" ? s : s && s.signal) || "")
+    .map(tokens);
+  const kept = [], stripped = [];
+  for (const f of facts) {
+    const ref = (f && (f.from_signal || f.fact)) || "";
+    const ft = tokens(ref);
+    // Földelt, ha van jel, aminek legalább 1 érdemi tokene egyezik a hivatkozással.
+    const grounded = ft.length > 0 && sigTokens.some((st) => st.some((w) => ft.includes(w)));
+    (grounded ? kept : stripped).push(f);
+  }
+  return { kept, stripped, stripped_count: stripped.length };
+}
+
+/**
+ * Attract-kimenet földelése: a known_facts-ból kiszedi a nem-visszavezethető
+ * állításokat, és jelöli, hányat dobott. A guard-láncból hívjuk, a jelölttel.
+ */
+export function groundAttraction(output, candidate) {
+  const gr = output && output.grounded_read;
+  if (gr && Array.isArray(gr.known_facts)) {
+    const g = assertGrounded(gr.known_facts, candidate && candidate.signals);
+    gr.known_facts = g.kept;
+    if (g.stripped_count) gr._stripped_ungrounded = g.stripped_count;
+  }
+  return output;
+}
+
+// ── Special-category (GDPR) minimalizálás ────────────────────────────
 const SENSITIVE_HINTS = [
   "egészségi", "egeszsegi", "betegség", "vallás", "vallasi", "etnik", "szexuál", "szexual",
   "terhes", "fogyaték", "fogyatek", "politikai párt", "szakszervezet",
