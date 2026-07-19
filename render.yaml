@@ -1,0 +1,25 @@
+# Render.com Blueprint — Recruitment Intelligence Copilot (éles web-app)
+# Használat: Render → New → Blueprint → válaszd ki ezt a repót.
+# A két titkos kulcsot (sync:false) a Render a telepítéskor kérdezi be,
+# NEM kerülnek a git-be.
+services:
+  - type: web
+    name: recruitment-intelligence-copilot
+    runtime: node
+    plan: free            # ingyenes: ~15 perc tétlenség után elalszik, első kérés ~50s hidegindítás
+    region: frankfurt     # EU — GDPR-közeli + alacsony latencia CEE-ből
+    branch: main
+    buildCommand: npm install
+    startCommand: node app/server.js
+    healthCheckPath: /api/status
+    envVars:
+      - key: ANTHROPIC_API_KEY   # 🧠 Agy — a Render kérdezi be (titkos)
+        sync: false
+      - key: FIRECRAWL_API_KEY   # 📡 Firecrawl — a Render kérdezi be (titkos)
+        sync: false
+      - key: CLAUDE_MODEL
+        value: claude-sonnet-5
+      - key: REACH_DEFAULT_SOURCE
+        value: auto
+      - key: NODE_VERSION
+        value: "20"

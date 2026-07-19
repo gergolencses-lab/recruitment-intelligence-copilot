@@ -8,8 +8,39 @@ import { loadProject, saveProject, upsertProject } from "../core/store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+app.set("trust proxy", true); // Render/hosting proxy mögött a valódi kliens-IP az X-Forwarded-For-ból
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
+
+// ── Egyszerű, függőség nélküli rate-limit a publikus éles módhoz ──
+// Védi a burn API-kulcsokat: korlátozza, hány drága (API-t hívó) POST-ot
+// futtathat egy IP egy időablakban. In-memory → redeploykor nullázódik.
+const RL_WINDOW_MS = 15 * 60 * 1000; // 15 perc
+const RL_MAX_PER_IP = 40;            // művelet / IP / ablak
+const RL_MAX_GLOBAL = 600;           // összes művelet / ablak (globális vészfék)
+const _rl = new Map();               // ip -> { count, resetAt }
+let _rlGlobal = { count: 0, resetAt: 0 };
+
+app.use("/api/", (req, res, next) => {
+  if (req.method !== "POST") return next(); // csak a drága, API-t hívó műveletek
+  const now = Date.now();
+  if (_rl.size > 5000) _rl.clear(); // memória-korlát: alkalmi ürítés
+
+  if (now > _rlGlobal.resetAt) _rlGlobal = { count: 0, resetAt: now + RL_WINDOW_MS };
+  if (_rlGlobal.count >= RL_MAX_GLOBAL) {
+    return res.status(429).json({ error: "A demo pillanatnyilag túlterhelt — próbáld pár perc múlva." });
+  }
+
+  const ip = (req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.ip || "unknown";
+  let b = _rl.get(ip);
+  if (!b || now > b.resetAt) { b = { count: 0, resetAt: now + RL_WINDOW_MS }; _rl.set(ip, b); }
+  if (b.count >= RL_MAX_PER_IP) {
+    const mins = Math.ceil((b.resetAt - now) / 60000);
+    return res.status(429).json({ error: `Elérted az ingyenes próbakeretet (${RL_MAX_PER_IP} művelet / 15 perc). Próbáld ~${mins} perc múlva.` });
+  }
+  b.count++; _rlGlobal.count++;
+  next();
+});
 
 // segéd: projekt betöltése vagy 404
 function getProj(res, id) {

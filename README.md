@@ -7,7 +7,27 @@ Ez egy **futtatható pilot** — nem mockup. Kulcs nélkül azonnal elindul (dem
 
 ---
 
-## 🚀 Gyorsindítás (2 perc)
+## 🌐 Kipróbálható élesben (publikus link)
+
+> **▶ Élő demo:** _<ide kerül a Render-URL az első telepítés után>_
+
+Bárki megnyithatja és valós keresést futtathat rajta. A backend a Renderen fut, a titkos kulcsok a Render env-változóiban élnek — sosem a repóban. (Ingyenes terv: ~15 perc tétlenség után elalszik, az első kérés ~50 mp hidegindítás, utána gyors.)
+
+### Telepítés Renderre — ~5 perc, egyszeri (Lencsés Gergő lépései)
+
+1. Menj a **[render.com](https://render.com)** oldalra → **Sign in with GitHub** (engedélyezd a privát repo elérését).
+2. **New → Blueprint** → válaszd a `recruitment-intelligence-copilot` repót. A Render beolvassa a `render.yaml`-t.
+3. Amikor bekéri a **titkos env-változókat**, illeszd be:
+   - `ANTHROPIC_API_KEY` → az `sk-ant-…` kulcsod
+   - `FIRECRAWL_API_KEY` → az `fc-…` kulcsod
+4. **Apply / Create** → a Render buildel és elindítja. Kész, amikor a `/api/status` zöld.
+5. Másold a kapott URL-t (`https://recruitment-intelligence-copilot.onrender.com`) ide a README tetejére, és oszd meg akivel akarod.
+
+_Alternatíva:_ [Railway](https://railway.app) vagy [Fly.io](https://fly.io) ugyanígy elviszi — mindkettő olvassa a `package.json` `start` scriptjét.
+
+---
+
+## 🚀 Gyorsindítás lokálisan (2 perc)
 
 ```bash
 cd "recruitment-intelligence-copilot"
