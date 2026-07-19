@@ -21,7 +21,8 @@
 
       <div class="side-label">Áttekintés</div>
       <nav class="steps">
-        <a href="#stage-overview" class="step" data-step="overview"><span class="dot"></span>Reports — áttekintés</a>
+        <a href="#stage-overview" class="step" data-step="overview"><span class="dot"></span>Cockpit — napi</a>
+        <a href="#stage-proof" class="step" data-step="proof"><span class="dot"></span>Proof — bizonyíték</a>
       </nav>
 
       <div class="side-label">Folyamat</div>
@@ -85,24 +86,23 @@
           </div>
         </div>
 
-        <!-- ── REPORTS / OVERVIEW ── -->
+        <!-- ── COCKPIT (Zita napi vezérlőpultja) ── -->
         <section class="stage plain" id="stage-overview">
-          <div class="ov-head">
-            <div>
-              <h2>Reports — áttekintés</h2>
-              <div class="stage-sub">A projekt fejvadász-metrikái: felkutatás, üldözési prioritás, elcsábítás. Élő a betöltött projekt-adatokból.</div>
+          <div id="ckStatus"></div>
+          <div class="ck-main">
+            <div class="ck-col-main">
+              <div id="ckHero"></div>
+              <div id="ckStuck"></div>
             </div>
-            <div class="period-pill">Projekt ▾</div>
+            <aside class="ck-col-side">
+              <div id="ckCoverage"></div>
+            </aside>
           </div>
-          <div class="kpi-row" id="kpiRow"></div>
-          <div class="chart-row a" style="margin-top:16px">
-            <div class="chart-card" id="chartSource"></div>
-            <div class="chart-card" id="chartFunnel"></div>
-          </div>
-          <div class="chart-row b" style="margin-top:16px">
-            <div class="chart-card" id="chartSignals"></div>
-            <div class="chart-card" id="chartRadar"></div>
-          </div>
+        </section>
+
+        <!-- ── PROOF (tulaj / fizető partner nézet) ── -->
+        <section class="stage plain" id="stage-proof">
+          <div id="proofBody"></div>
         </section>
 
         <!-- 1) INTAKE -->

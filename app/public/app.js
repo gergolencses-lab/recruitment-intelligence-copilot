@@ -140,39 +140,210 @@ function emptyChart(el, title, sub, msg) {
   el.innerHTML = `<div class="chart-head"><div><div class="chart-title">${esc(title)}</div><div class="chart-sub">${esc(sub)}</div></div></div><div class="ov-empty">${esc(msg)}</div>`;
 }
 
-function renderOverview(p) {
+function daysSince(iso) { if (!iso) return null; const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000); return isNaN(d) ? null : d; }
+function shorten(s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n - 1).trim() + "…" : s; }
+function sentiChip(s) { const m = { "pozitív": "good", "semleges": "warn", "negatív": "bad" }; return `<span class="chip ${m[s] || ""}">válasz: ${esc(s)}</span>`; }
+
+// ── COCKPIT (Zita napi vezérlőpultja) ──
+function cockpitModel(p) {
   const c = (p && p.candidates) || [];
-  const ranking = p && p.ranking;
-  const tierMap = {}; let tA = 0, tB = 0, tC = 0;
-  if (ranking && ranking.ranked) ranking.ranked.forEach((r) => { const t = tierLetter(r.tier); tierMap[r.candidate_id] = t; if (t === "A") tA++; else if (t === "B") tB++; else tC++; });
-  const attractionCount = p ? Object.keys(p.attraction || {}).length : 0;
-  const outreachCount = p ? Object.keys(p.outreach || {}).length : 0;
-  const assessCount = p ? Object.keys(p.assessments || {}).length : 0;
-  const strongSignals = c.reduce((s, cd) => s + (cd.signals || []).filter((x) => x.strength === "erős").length, 0);
-  const totalSignals = c.reduce((s, cd) => s + (cd.signals || []).length, 0);
-  const source = (p && p.discover_source) || "—";
+  const byId = {}; c.forEach((x) => (byId[x.id] = x));
+  const ranked = (p && p.ranking && p.ranking.ranked) || [];
+  const os = (p && p.outreach_status) || {}, attr = (p && p.attraction) || {}, out = (p && p.outreach) || {}, ass = (p && p.assessments) || {};
+  const coolDays = (p && p.pilot && p.pilot.cooling_days) || 7;
+  const rows = ranked.filter((r) => { const t = tierLetter(r.tier); return t === "A" || t === "B"; }).map((r) => {
+    const id = r.candidate_id, cand = byId[id] || {}, st = os[id] || {};
+    return {
+      id, cand, tier: tierLetter(r.tier), priority: r.pursue_priority,
+      reason: (ass[id] && ass[id].standout) || shorten(r.rationale, 88),
+      hook: attr[id] && attr[id].hook, hasAttr: !!attr[id], hasDraft: !!out[id],
+      sent: !!st.sent_at, replied: !!st.replied, sentiment: st.sentiment, touched: daysSince(cand.last_touched),
+    };
+  });
+  return { c, rows, coolDays };
+}
 
-  // KPI row
-  const pctA = c.length ? Math.round((tA / c.length) * 100) : 0;
-  const avgStrong = c.length ? (strongSignals / c.length).toFixed(1) : "0";
-  $("#kpiRow").innerHTML =
-    kpiCard("var(--accent-tint)", "var(--accent)", "Felkutatott jelöltek", "Aktuális projekt", c.length,
-      { txt: source === "firecrawl" ? "élő" : source === "synthetic" ? "szintetikus" : "—", cls: "neutral" },
-      "Passzív célszemélyek a poolban.") +
-    kpiCard("var(--tint-blue)", "var(--dot-blue)", "„A” prioritás", "Most üldözd", ranking ? tA : "—",
-      ranking ? { txt: pctA + "%", cls: "" } : { txt: "rangsor kell", cls: "neutral" },
-      ranking ? "A pool azonnal üldözendő része." : "Futtass rangsorolást a Rank lépésben.") +
-    kpiCard("var(--tint-cyan)", "var(--dot-cyan)", "Elcsábítási tervek", "Bespoke stratégia", attractionCount,
-      { txt: outreachCount + " draft", cls: "neutral" },
-      "Kidolgozott megnyerési stratégiák.") +
-    kpiCard("var(--tint-green)", "var(--dot-green)", "Erős jelek", "Evidencia a poolban", strongSignals,
-      { txt: "Ø " + avgStrong + "/fő", cls: "neutral" },
-      "Megerősített szakmai jelek összesen.");
+function renderOverview(p) {
+  const st = $("#ckStatus"); if (!st) return;
+  const hero = $("#ckHero"), stuck = $("#ckStuck"), cov = $("#ckCoverage");
+  if (!p || !(p.candidates || []).length || !p.ranking) {
+    st.innerHTML = "";
+    hero.innerHTML = `<div class="ov-empty">A cockpit a felkutatott + rangsorolt jelöltekből él. Menj végig: Intake → Discover → Rank — utána itt látod egy pillantással, kit üldözz ma, mi akad, és hol a piaci vak folt.</div>`;
+    stuck.innerHTML = ""; cov.innerHTML = "";
+    renderProof(p); return;
+  }
+  const d = cockpitModel(p);
+  renderCkStatus(p, d); renderCkHero(p, d); renderCkStuck(p, d); renderCkCoverage(p, d); renderProof(p);
+}
 
-  renderGauge($("#chartSource"), c);
-  renderFunnel($("#chartFunnel"), { discovered: c.length, assessed: assessCount, tierA: tA, attracted: attractionCount, outreach: outreachCount });
-  renderSignalBars($("#chartSignals"), c, tierMap, { tA, tB, tC, hasRank: !!ranking });
-  renderRadar($("#chartRadar"), c, { attractionCount, outreachCount, strongSignals, totalSignals });
+function renderCkStatus(p, d) {
+  const A = d.rows.filter((r) => r.tier === "A");
+  const contactable = A.filter((r) => r.hasAttr && r.hasDraft).length;
+  const blocked = d.rows.filter((r) => !(r.hasAttr && r.hasDraft)).length;
+  const cooling = d.rows.filter((r) => r.hasAttr && !r.replied && (r.touched == null || r.touched > d.coolDays)).length;
+  const sent = Object.values(p.outreach_status || {}).filter((s) => s && s.sent_at).length;
+  const age = daysSince(p.created_at);
+  $("#ckStatus").innerHTML = `<div class="ck-status">
+    <div class="ck-status-main">
+      <div class="ck-status-num">${contactable}</div>
+      <div><div class="ck-status-lbl">most kontaktálható A-tier <span class="ck-hint">(van szög ÉS kész draft)</span></div>
+      <div class="ck-status-sub">${A.length} A-tier · ${blocked} blokkolt · ${cooling} hűl · keresés kora ${age == null ? "?" : age} nap</div></div>
+    </div>
+    <button class="ck-phase2" data-goto="proof">kimenet-mérés: ${sent}/${d.rows.length} kiküldve · Proof →</button>
+  </div>`;
+  const b = $("#ckStatus .ck-phase2"); if (b) b.onclick = () => $("#stage-proof").scrollIntoView({ behavior: "smooth" });
+}
+
+function actionRow(r, coolDays) {
+  const draftState = r.replied ? sentiChip(r.sentiment)
+    : r.sent ? `<span class="chip good">kiküldve</span>`
+    : r.hasDraft ? `<span class="chip">draft kész</span>`
+    : r.hasAttr ? `<span class="chip warn">nincs draft</span>`
+    : `<span class="chip warn">nincs szög</span>`;
+  const cta = !r.hasAttr ? "⭐ Elcsábítás" : !r.hasDraft ? "Draft készítése" : "Draft megnyitása";
+  const cool = (r.touched != null && r.touched > coolDays) ? `<span class="ck-cool">· ${r.touched} napja nem érintve</span>` : "";
+  let track = "";
+  if (r.hasDraft && !r.sent) track = `<button class="ck-mini" data-act="sent" data-id="${r.id}">Kiküldve ✓</button>`;
+  else if (r.sent && !r.replied) track = `<span class="ck-mini-lbl">válasz:</span><button class="ck-mini good" data-act="pozitív" data-id="${r.id}">+</button><button class="ck-mini warn" data-act="semleges" data-id="${r.id}">0</button><button class="ck-mini bad" data-act="negatív" data-id="${r.id}">−</button>`;
+  else if (r.replied) track = `<button class="ck-mini" data-act="reset" data-id="${r.id}" title="visszavonás">↺</button>`;
+  return `<div class="act-card tier-${r.tier}">
+    <div class="act-rank">${r.priority}</div>
+    <div class="act-body">
+      <div class="act-top"><span class="act-name">${esc(r.cand.name || r.id)}</span><span class="tier-badge">${r.tier}</span></div>
+      <div class="act-co">${esc(r.cand.headline || "")}${r.cand.current_company ? " · " + esc(r.cand.current_company) : ""}</div>
+      <div class="act-why">${esc(r.reason || "")}</div>
+      ${r.hook ? `<div class="act-hook">🪝 „${esc(shorten(r.hook, 150))}”</div>` : ""}
+      <div class="act-foot">${draftState}${cool}<span class="act-track">${track}</span></div>
+    </div>
+    <button class="btn btn-primary act-cta" data-id="${r.id}">${cta}</button>
+  </div>`;
+}
+
+function renderCkHero(p, d) {
+  const rows = d.rows.slice(0, 12);
+  $("#ckHero").innerHTML = `<div class="ck-sec-head"><h3>Következő lépések — kit üldözz most</h3><span class="ck-sec-note">${d.rows.length} A/B jelölt üldözési sorrendben${d.rows.length > 12 ? " · top 12" : ""}</span></div><div class="act-list">${rows.map((r) => actionRow(r, d.coolDays)).join("")}</div>`;
+  $$("#ckHero .act-cta").forEach((btn) => (btn.onclick = () => openAttract(btn.dataset.id)));
+  $$("#ckHero .ck-mini").forEach((btn) => (btn.onclick = () => trackOutreach(btn.dataset.id, btn.dataset.act)));
+}
+
+async function trackOutreach(id, act) {
+  try {
+    const body = act === "sent" ? { candidateId: id, status: "sent" } : act === "reset" ? { candidateId: id, status: "reset" } : { candidateId: id, sentiment: act };
+    const r = await api("POST", `/api/project/${state.projectId}/outreach-status`, body);
+    state.project.outreach_status = state.project.outreach_status || {};
+    if (r.status) state.project.outreach_status[id] = r.status; else delete state.project.outreach_status[id];
+    const cd = (state.project.candidates || []).find((x) => x.id === id); if (cd) cd.last_touched = new Date().toISOString();
+    renderOverview(state.project);
+  } catch (e) { toast("Hiba: " + e.message); }
+}
+
+function openAttract(id) {
+  $("#attractCand").value = id;
+  $("#stage-attract").scrollIntoView({ behavior: "smooth" });
+  const stored = state.project && state.project.attraction && state.project.attraction[id];
+  const cand = (state.project.candidates || []).find((c) => c.id === id);
+  if (stored) {
+    renderAttract(stored, cand);
+    const dr = state.project.outreach && state.project.outreach[id];
+    $("#outreachOut").innerHTML = ""; if (dr) renderOutreach(dr);
+  } else $("#attractBtn").click();
+}
+
+function renderCkStuck(p, d) {
+  const blockers = d.rows.map((r) => {
+    const need = !r.hasAttr ? { txt: "nincs elcsábítási szög", cta: "Elcsábítás" }
+      : !r.hasDraft ? { txt: "nincs outreach draft", cta: "Draft" }
+      : (String(r.cand.art14_status || "").includes("pending") ? { txt: "GDPR Art.14 rendezetlen", cta: "Megnyit" } : null);
+    return need ? { ...r, need } : null;
+  }).filter(Boolean);
+  const cooling = d.rows.filter((r) => r.hasAttr && !r.replied && (r.touched == null || r.touched > d.coolDays))
+    .sort((a, b) => (b.touched == null ? 9999 : b.touched) - (a.touched == null ? 9999 : a.touched));
+  const bHtml = blockers.length ? blockers.slice(0, 8).map((r) => `<div class="stuck-item"><span class="tier-badge tier-${r.tier} tb">${r.tier}</span><span class="stuck-name">${esc(r.cand.name || r.id)}</span><span class="stuck-need">${esc(r.need.txt)}</span><button class="btn stuck-cta" data-id="${r.id}">${r.need.cta}</button></div>`).join("") : `<div class="ov-empty sm">Nincs blokkolt A/B jelölt — mind mozgatható. 💪</div>`;
+  const cHtml = cooling.length ? cooling.slice(0, 8).map((r) => `<div class="stuck-item"><span class="stuck-days">${r.touched == null ? "—" : r.touched + "n"}</span><span class="stuck-name">${esc(r.cand.name || r.id)}</span><span class="stuck-need">${r.touched == null ? "még nem érintve" : "hűl"}</span><button class="btn stuck-cta touch" data-id="${r.id}">Megérintve</button></div>`).join("") : `<div class="ov-empty sm">Nincs hűlő szál — minden priorizált jelölt friss.</div>`;
+  $("#ckStuck").innerHTML = `<div class="stuck-grid">
+    <div><div class="ck-sec-head sm"><h3>Ami blokkol</h3><span class="ck-sec-note">${blockers.length} jelölt akad egy hiányzó lépésen</span></div>${bHtml}</div>
+    <div><div class="ck-sec-head sm"><h3>Hűlő szálak</h3><span class="ck-sec-note">priorizált, de mozdulatlan</span></div>${cHtml}</div>
+  </div>`;
+  $$("#ckStuck .stuck-cta").forEach((btn) => (btn.onclick = () => btn.classList.contains("touch") ? touchCand(btn.dataset.id) : openAttract(btn.dataset.id)));
+}
+
+async function touchCand(id) {
+  try {
+    await api("POST", `/api/project/${state.projectId}/touch`, { candidateId: id });
+    const cd = (state.project.candidates || []).find((x) => x.id === id); if (cd) cd.last_touched = new Date().toISOString();
+    renderOverview(state.project); toast("Megérintve — kikerült a hűlő szálakból.");
+  } catch (e) { toast("Hiba: " + e.message); }
+}
+
+function renderCkCoverage(p, d) {
+  const c = d.c;
+  const dist = {}; c.forEach((x) => { const k = x.source_type || "egyéb"; dist[k] = (dist[k] || 0) + 1; });
+  const entries = Object.entries(dist).sort((a, b) => b[1] - a[1]);
+  const top = entries[0] || ["—", 0];
+  const topShare = c.length ? top[1] / c.length : 0;
+  const thr = (p.pilot && p.pilot.mono_source_threshold) || 0.7;
+  const mono = topShare >= thr && entries.length <= 2;
+  const targets = (p.talent_map && p.talent_map.target_companies && p.talent_map.target_companies.map((t) => t.name)) || (p.query && p.query.target_companies) || [];
+  const companies = c.map((x) => (x.current_company || "").toLowerCase()).filter(Boolean);
+  const covered = targets.filter((t) => { const key = String(t || "").toLowerCase().replace(/[()]/g, "").slice(0, 7); return key && companies.some((cc) => cc.includes(key)); }).length;
+  const blind = Math.max(0, targets.length - covered);
+  let callout = "";
+  if (mono) callout = `A pool <b>${Math.round(topShare * 100)}%-a egy forrásból</b> (${esc(srcLabel(top[0]))}). A többi csatorna (LinkedIn/GitHub/közösség) szisztematikusan kimarad → bővítsd a Discovery-t más forrással, mielőtt a poolból következtetsz.`;
+  else if (blind > 0) callout = `<b>${blind} cél-cég érintetlen</b> a ${targets.length}-ből — vak folt. Kutasd fel ezeket, mielőtt lezárnád a merítést.`;
+  else callout = `A merítés forrás- és cégoldalról kiegyensúlyozott — nincs kiugró vak folt.`;
+  const alert = mono || blind > 0;
+  const distHtml = entries.map(([k, v]) => `<div class="cov-src"><span class="cov-src-lbl">${esc(srcLabel(k))}</span><span class="cov-bar"><span style="width:${Math.round(v / c.length * 100)}%;background:${k === top[0] && mono ? "var(--bad)" : "var(--accent)"}"></span></span><span class="cov-src-val">${Math.round(v / c.length * 100)}%</span></div>`).join("");
+  $("#ckCoverage").innerHTML = `<div class="cov-card ${alert ? "alert" : ""}">
+    <div class="ck-sec-head sm"><h3>Lefedettség-őr</h3>${alert ? `<span class="cov-flag">figyelem</span>` : `<span class="cov-ok">rendben</span>`}</div>
+    <div class="cov-block"><div class="cov-label">Forrás-koncentráció</div>${distHtml || "<div class='ov-empty sm'>—</div>"}</div>
+    <div class="cov-block"><div class="cov-label">Cél-cég lefedettség</div><div class="cov-targets">${covered}/${targets.length} érintve · <b>${blind}</b> vak folt</div></div>
+    <div class="cov-callout ${alert ? "alert" : ""}">${callout}</div>
+  </div>`;
+}
+
+function abRowCount(p) { const ranked = (p.ranking && p.ranking.ranked) || []; return ranked.filter((r) => { const t = tierLetter(r.tier); return t === "A" || t === "B"; }).length; }
+
+function renderProof(p) {
+  const el = $("#proofBody"); if (!el) return;
+  if (!p) { el.innerHTML = `<div class="ov-empty">Válassz projektet a bizonyíték-nézethez.</div>`; return; }
+  const vals = Object.values(p.outreach_status || {});
+  const sent = vals.filter((s) => s && s.sent_at).length;
+  const replied = vals.filter((s) => s && s.replied).length;
+  const positive = vals.filter((s) => s && s.replied && (s.sentiment === "pozitív" || s.sentiment === "semleges")).length;
+  const rate = sent ? Math.round(positive / sent * 100) : null;
+  const base = p.baseline_response_rate;
+  const delta = (rate != null && base != null) ? rate - base : null;
+  const age = daysSince(p.created_at);
+  const shortDays = (p.first_shortlist_at && p.created_at) ? Math.floor((new Date(p.first_shortlist_at) - new Date(p.created_at)) / 86400000) : null;
+
+  const heroHtml = sent === 0
+    ? `<div class="proof-empty"><div class="proof-empty-num">0/${abRowCount(p)}</div><div class="proof-empty-lbl">célszemély kiküldve</div><p>A bizonyíték-szám — elcsábítás pozitív-válasz arány vs. Zita baseline-je — itt jelenik meg, amint a cockpitban „kiküldve"-nek jelölöd a megkereséseket és beérkezik a válasz. Kitalált számot sosem mutatunk.</p></div>`
+    : `<div class="proof-compare">
+        <div class="proof-col"><div class="proof-big">${rate}%</div><div class="proof-cap">RIC elcsábítás<br>pozitív-válasz arány</div></div>
+        <div class="proof-vs">vs</div>
+        <div class="proof-col dim"><div class="proof-big">${base == null ? "—" : base + "%"}</div><div class="proof-cap">Zita baseline<br>(kézi outreach)</div></div>
+        ${delta != null ? `<div class="proof-delta ${delta >= 0 ? "pos" : "neg"}">${delta >= 0 ? "+" : ""}${delta}pp</div>` : `<div class="proof-delta muted">add meg a baseline-t →</div>`}
+      </div>
+      <div class="proof-sample">${positive}/${sent} kiküldött célszemély reagált pozitívan${replied > positive ? ` · ${replied - positive} semleges/negatív` : ""}</div>`;
+
+  el.innerHTML = `
+    <div class="page-head" style="margin-bottom:0"><div><div class="crumbs">Tulaj / fizető partner nézet</div><h1 style="font-size:20px">Bizonyíték — működik-e a módszer?</h1><div class="page-sub">EGY kérdés: az elcsábítás érdemben magasabb pozitív-válasz arányt hoz-e a jelenlegi kézi módszernél, és gyorsabb-e a shortlist. Őszinte üres állapot, míg nincs valós adat.</div></div></div>
+    <div class="proof-hero card">${heroHtml}</div>
+    <div class="proof-row">
+      <div class="card proof-metric"><div class="cov-label">Idő az első prezentálható shortlistig</div>
+        ${shortDays != null ? `<div class="proof-mid">${shortDays} nap</div><div class="kpi-desc">cél: ≥30% gyorsulás a kézi módszerhez képest</div><button class="btn btn-ghost" id="proofShortClear" style="margin-top:6px">visszavonás</button>`
+          : `<div class="proof-mid">${age == null ? "?" : age} napja fut</div><button class="btn" id="proofShortDone" style="margin-top:6px">Shortlist kész — jelöld most</button>`}
+      </div>
+      <div class="card proof-metric"><div class="cov-label">Zita baseline válaszaránya</div>
+        <div class="proof-baseline-row"><input id="proofBaseline" class="brief-line" type="number" min="0" max="100" placeholder="%" value="${base == null ? "" : base}" style="max-width:100px"><button class="btn" id="proofBaselineSave">Mentés</button></div>
+        <div class="kpi-desc">Egyszeri, kézzel — ehhez méri magát a pilot (önbevallás vagy korábbi ATS-export).</div>
+      </div>
+    </div>
+    <div class="note">Mérési horizont: a kiküldés/válasz a cockpit „kiküldve/válasz" jelöléséből épül (a rendszer nem küld). A teljes automata engagement/ATS Fázis 2. A szakaszidő-alapú konverzió akkor pontos, ha a szakaszváltások időbélyegzettek.</div>`;
+
+  const bs = $("#proofBaselineSave"); if (bs) bs.onclick = async () => { const r = await api("POST", `/api/project/${state.projectId}/baseline`, { rate: $("#proofBaseline").value }); state.project.baseline_response_rate = r.baseline_response_rate; renderProof(state.project); toast("Baseline mentve."); };
+  const sd = $("#proofShortDone"); if (sd) sd.onclick = async () => { const r = await api("POST", `/api/project/${state.projectId}/shortlist-done`, {}); state.project.first_shortlist_at = r.first_shortlist_at; renderProof(state.project); toast("Shortlist-idő rögzítve."); };
+  const sc = $("#proofShortClear"); if (sc) sc.onclick = async () => { await api("POST", `/api/project/${state.projectId}/shortlist-done`, { clear: true }); state.project.first_shortlist_at = null; renderProof(state.project); };
 }
 
 // Chart 1 — fél-donut gauge: jelöltek forrás szerint

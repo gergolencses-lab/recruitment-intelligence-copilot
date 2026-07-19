@@ -102,6 +102,7 @@ app.post("/api/project/:id/assess", A(async (req, res) => {
   if (!cand) return res.status(404).json({ error: "Nincs ilyen jelölt" });
   const out = await ric.profileAssess({ candidate: cand, intake: p.intake }, { projectId: p.id });
   p.assessments[cand.id] = out;
+  cand.last_touched = new Date().toISOString();
   saveProject(p);
   res.json(out);
 }));
@@ -126,6 +127,7 @@ app.post("/api/project/:id/attract", A(async (req, res) => {
     { projectId: p.id }
   );
   p.attraction[cand.id] = out;
+  cand.last_touched = new Date().toISOString();
   saveProject(p);
   res.json(out);
 }));
@@ -141,6 +143,7 @@ app.post("/api/project/:id/outreach", A(async (req, res) => {
     { projectId: p.id }
   );
   p.outreach[cand.id] = out;
+  cand.last_touched = new Date().toISOString();
   saveProject(p);
   res.json(out);
 }));
@@ -178,6 +181,52 @@ app.post("/api/project/:id/art14", A((req, res) => {
   const cand = (p.candidates || []).find((c) => c.id === req.body.candidateId);
   if (!cand) return res.status(404).json({ error: "Nincs ilyen jelölt" });
   res.json(ric.art14Notice({ candidate: cand, controller: req.body.controller }, { projectId: p.id }));
+}));
+
+// Követés: "megérintve" — last_touched frissítése (hűlő szálak feloldása)
+app.post("/api/project/:id/touch", A((req, res) => {
+  const p = getProj(res, req.params.id);
+  if (!p) return;
+  const cand = (p.candidates || []).find((c) => c.id === req.body.candidateId);
+  if (!cand) return res.status(404).json({ error: "Nincs ilyen jelölt" });
+  cand.last_touched = new Date().toISOString();
+  saveProject(p);
+  res.json({ ok: true, last_touched: cand.last_touched });
+}));
+
+// Követés: outreach-státusz — a recruiter jelöli (kiküldve / válasz). A rendszer NEM küld.
+app.post("/api/project/:id/outreach-status", A((req, res) => {
+  const p = getProj(res, req.params.id);
+  if (!p) return;
+  const id = req.body.candidateId;
+  const cand = (p.candidates || []).find((c) => c.id === id);
+  if (!cand) return res.status(404).json({ error: "Nincs ilyen jelölt" });
+  const cur = p.outreach_status[id] || {};
+  if (req.body.status === "sent") cur.sent_at = cur.sent_at || new Date().toISOString();
+  if (req.body.status === "reset") { delete p.outreach_status[id]; saveProject(p); return res.json({ ok: true, status: null }); }
+  if (req.body.sentiment) { cur.replied = true; cur.replied_at = new Date().toISOString(); cur.sentiment = req.body.sentiment; }
+  p.outreach_status[id] = cur;
+  cand.last_touched = new Date().toISOString();
+  saveProject(p);
+  res.json({ ok: true, status: cur });
+}));
+
+// Pilot baseline (Zita jelenlegi válaszaránya, %) + shortlist-kész időbélyeg
+app.post("/api/project/:id/baseline", A((req, res) => {
+  const p = getProj(res, req.params.id);
+  if (!p) return;
+  const r = Number(req.body.rate);
+  p.baseline_response_rate = isFinite(r) ? r : null;
+  saveProject(p);
+  res.json({ ok: true, baseline_response_rate: p.baseline_response_rate });
+}));
+
+app.post("/api/project/:id/shortlist-done", A((req, res) => {
+  const p = getProj(res, req.params.id);
+  if (!p) return;
+  p.first_shortlist_at = req.body.clear ? null : (p.first_shortlist_at || new Date().toISOString());
+  saveProject(p);
+  res.json({ ok: true, first_shortlist_at: p.first_shortlist_at });
 }));
 
 // Memory

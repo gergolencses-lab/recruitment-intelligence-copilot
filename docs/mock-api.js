@@ -59,8 +59,9 @@
   // ── In-memory projekt-store ──
   const STORE = {};
   function emptyProject(id, name) {
-    return { id, name: name || id, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), brief_raw: "", intake: null, query: null, candidates: [], talent_map: null, assessments: {}, ranking: null, attraction: {}, outreach: {}, advisory: null, interview: null, coach_notes: [], memory: [], interactions: [] };
+    return { id, name: name || id, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), brief_raw: "", intake: null, query: null, candidates: [], talent_map: null, assessments: {}, ranking: null, attraction: {}, outreach: {}, outreach_status: {}, baseline_response_rate: null, first_shortlist_at: null, pilot: { cooling_days: 7, mono_source_threshold: 0.7 }, advisory: null, interview: null, coach_notes: [], memory: [], interactions: [] };
   }
+  const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString();
   function seed() {
     const p = emptyProject("acme-staff-be", "Acme Staff BE");
     p.brief_raw = "Senior Java fejlesztő, 10+ év, aki egyedül viszi a payments rendszerünket, de csapatot is épít. Budapest, hibrid.";
@@ -69,11 +70,17 @@
     p.candidates = synthPool();
     p.discover_source = "synthetic";
     p.discover_note = "Szintetikus pool (senior tech / CEE) — statikus demo. Élő discovery-hoz Firecrawl-kulcs kell a helyi futtatásnál.";
+    p.created_at = daysAgo(6);
     p.ranking = demo.rankTargets({ candidates: p.candidates });
     p.assessments["syn-001"] = demo.profileAssess({ candidate_id: "syn-001" });
-    p.attraction["syn-001"] = demo.attractionStrategy({ candidate_id: "syn-001" });
-    p.attraction["syn-002"] = demo.attractionStrategy({ candidate_id: "syn-002" });
-    p.outreach["syn-002"] = demo.outreachDraft({ candidate_id: "syn-002" });
+    ["syn-001", "syn-002", "syn-003", "syn-004", "syn-006"].forEach((id) => (p.attraction[id] = demo.attractionStrategy({ candidate_id: id })));
+    ["syn-001", "syn-002"].forEach((id) => (p.outreach[id] = demo.outreachDraft({ candidate_id: id })));
+    p.outreach_status["syn-002"] = { sent_at: daysAgo(3), replied: true, replied_at: daysAgo(2), sentiment: "pozitív" };
+    p.outreach_status["syn-001"] = { sent_at: daysAgo(1) };
+    p.baseline_response_rate = 8;
+    // last_touched: az aktívan mozgatottak frissek, kettő már hűl
+    const touch = { "syn-001": 1, "syn-002": 2, "syn-003": 1, "syn-004": 11, "syn-006": 14 };
+    p.candidates.forEach((c) => { if (touch[c.id] != null) c.last_touched = daysAgo(touch[c.id]); });
     p.talent_map = demo.talentMap();
     p.advisory = demo.clientAdvisory();
     STORE[p.id] = p;
@@ -102,10 +109,21 @@
       if (action === "query") { p.query = demo.queryBuild(); return p.query; }
       if (action === "discover") { p.candidates = synthPool(); p.discover_source = "synthetic"; p.discover_note = "Szintetikus pool (senior tech / CEE) — statikus demo, nincs élő scraping."; return { source: "synthetic", candidates: p.candidates, note: p.discover_note }; }
       if (action === "talent-map") { p.talent_map = demo.talentMap(); return p.talent_map; }
-      if (action === "assess") { const o = demo.profileAssess({ candidate_id: body.candidateId }); p.assessments[body.candidateId] = o; return o; }
+      const touch = (id) => { const cd = cand(id); if (cd) cd.last_touched = new Date().toISOString(); };
+      if (action === "assess") { const o = demo.profileAssess({ candidate_id: body.candidateId }); p.assessments[body.candidateId] = o; touch(body.candidateId); return o; }
       if (action === "rank") { p.ranking = demo.rankTargets({ candidates: p.candidates }); return p.ranking; }
-      if (action === "attract") { const o = demo.attractionStrategy({ candidate_id: body.candidateId }); p.attraction[body.candidateId] = o; return o; }
-      if (action === "outreach") { const o = demo.outreachDraft({ candidate_id: body.candidateId }); p.outreach[body.candidateId] = o; return o; }
+      if (action === "attract") { const o = demo.attractionStrategy({ candidate_id: body.candidateId }); p.attraction[body.candidateId] = o; touch(body.candidateId); return o; }
+      if (action === "outreach") { const o = demo.outreachDraft({ candidate_id: body.candidateId }); p.outreach[body.candidateId] = o; touch(body.candidateId); return o; }
+      if (action === "touch") { touch(body.candidateId); return { ok: true }; }
+      if (action === "outreach-status") {
+        const id = body.candidateId, cur = p.outreach_status[id] || {};
+        if (body.status === "reset") { delete p.outreach_status[id]; return { ok: true, status: null }; }
+        if (body.status === "sent") cur.sent_at = cur.sent_at || new Date().toISOString();
+        if (body.sentiment) { cur.replied = true; cur.replied_at = new Date().toISOString(); cur.sentiment = body.sentiment; }
+        p.outreach_status[id] = cur; touch(id); return { ok: true, status: cur };
+      }
+      if (action === "baseline") { const r = Number(body.rate); p.baseline_response_rate = isFinite(r) ? r : null; return { ok: true, baseline_response_rate: p.baseline_response_rate }; }
+      if (action === "shortlist-done") { p.first_shortlist_at = body.clear ? null : (p.first_shortlist_at || new Date().toISOString()); return { ok: true, first_shortlist_at: p.first_shortlist_at }; }
       if (action === "advisory") { p.advisory = demo.clientAdvisory(); return p.advisory; }
       if (action === "interview") { p.interview = demo.interviewIntel(); return p.interview; }
       if (action === "coach") { const o = demo.recruitmentCoach(); p.coach_notes.push({ ts: new Date().toISOString(), ...o }); return o; }

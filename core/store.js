@@ -30,6 +30,10 @@ export function emptyProject(id, name) {
     ranking: null,         // rankTargets output
     attraction: {},        // candidate_id -> attractionStrategy
     outreach: {},          // candidate_id -> outreachDraft
+    outreach_status: {},   // candidate_id -> { sent_at, replied, sentiment }  (a recruiter jelöli, a rendszer nem küld)
+    baseline_response_rate: null, // Zita jelenlegi outreach-válaszaránya (%), egyszer, kézzel
+    first_shortlist_at: null,     // mikor lett kész az első prezentálható shortlist
+    pilot: { cooling_days: 7, mono_source_threshold: 0.7 },
     advisory: null,
     interview: null,
     coach_notes: [],
@@ -38,11 +42,20 @@ export function emptyProject(id, name) {
   };
 }
 
+// Régi projektek előre-kompatibilissá tétele: hiányzó mezők feltöltése.
+function normalizeProject(p) {
+  if (!p.outreach_status) p.outreach_status = {};
+  if (p.baseline_response_rate === undefined) p.baseline_response_rate = null;
+  if (p.first_shortlist_at === undefined) p.first_shortlist_at = null;
+  if (!p.pilot) p.pilot = { cooling_days: 7, mono_source_threshold: 0.7 };
+  return p;
+}
+
 export function loadProject(id) {
   ensureDirs();
   const p = projPath(id);
   if (!fs.existsSync(p)) return null;
-  return JSON.parse(fs.readFileSync(p, "utf8"));
+  return normalizeProject(JSON.parse(fs.readFileSync(p, "utf8")));
 }
 
 export function saveProject(proj) {
