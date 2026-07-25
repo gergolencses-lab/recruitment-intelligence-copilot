@@ -114,7 +114,7 @@ app.post("/api/project/:id/intake", A(async (req, res) => {
 app.post("/api/project/:id/query", A(async (req, res) => {
   const p = getProj(req, res);
   if (!p) return;
-  p.query = await ric.queryBuild({ intake: p.intake, brief: p.brief_raw, position: p.position }, { projectId: p.id });
+  p.query = await ric.queryBuild({ intake: p.intake, brief: p.brief_raw, position: p.position, briefFinal: p.brief_final }, { projectId: p.id });
   saveProject(p);
   res.json(p.query);
 }));
@@ -125,7 +125,8 @@ app.post("/api/project/:id/discover", A(async (req, res) => {
   if (!p) return;
   const source = (req.body && req.body.source) || undefined;
   const sq = (p.query && p.query.firecrawl_search_queries) || [];
-  const result = await ric.discoverCandidates({ searchQueries: sq, source }, { projectId: p.id });
+  const client = (p.position && p.position.client) || "";
+  const result = await ric.discoverCandidates({ searchQueries: sq, source, client }, { projectId: p.id });
   p.candidates = result.candidates;
   p.discover_note = result.note;
   p.discover_source = result.source;
@@ -140,6 +141,26 @@ app.post("/api/project/:id/talent-map", A(async (req, res) => {
   p.talent_map = await ric.talentMap({ intake: p.intake, brief: p.brief_raw, position: p.position }, { projectId: p.id });
   saveProject(p);
   res.json(p.talent_map);
+}));
+
+// 3c) Stratégia-asszisztens — a keresési terv és a célpiac-térkép szerkesztése
+// chatben. A műveleteket a kliens alkalmazza (tételesen, visszavonhatóan), a
+// szerver csak a javaslatot állítja elő — így a recruiteré marad a döntés.
+app.post("/api/project/:id/strategy-chat", A(async (req, res) => {
+  const p = getProj(req, res);
+  if (!p) return;
+  const out = await ric.strategyChat(
+    {
+      message: (req.body && req.body.message) || "",
+      query: p.query,
+      talentMap: p.talent_map,
+      exclusions: p.exclusions,
+      position: p.position,
+      history: (p.strategy_chat || []).slice(-6),
+    },
+    { projectId: p.id }
+  );
+  res.json(out);
 }));
 
 // 4) Assess one candidate

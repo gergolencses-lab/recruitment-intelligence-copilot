@@ -29,6 +29,7 @@ Kimeneti séma:
       "name": "<név vagy null>",
       "headline": "<jelenlegi szerep/pozíció rövid leírása vagy null>",
       "current_company": "<cég vagy null>",
+      "past_companies": ["<korábbi munkáltató, ha a szövegből EVIDENCIÁLISAN kiolvasható — különben üres tömb>"],
       "location": "<város/ország vagy null>",
       "signals": [ { "signal": "<konkrét szakmai jel a szövegből>", "strength": "erős|közepes|gyenge" } ]
     }
@@ -69,6 +70,9 @@ export async function normalizeHits(hits) {
       name,
       headline: stripSensitive(e.headline || h.description || h.title || ""),
       current_company: e.current_company || null,
+      // A kizárási szabály ("korábban az ügyfélnél dolgozott") ezen a mezőn áll
+      // vagy bukik — ha üres, csak a jelenlegi munkáltatóra tudunk szűrni.
+      past_companies: Array.isArray(e.past_companies) ? e.past_companies.filter(Boolean) : [],
       location: e.location || null,
       is_person: e.is_person !== false,
       signals: signals.length ? signals : [{ signal: stripSensitive(h.description || ""), strength: "gyenge" }],
