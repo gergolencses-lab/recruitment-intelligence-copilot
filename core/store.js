@@ -56,8 +56,13 @@ export function emptyProject(id, name) {
     updated_at: new Date().toISOString(),
     brief_raw: "",
     intake: null,          // intakeReframe output
+    brief_final: null,     // a recruiter által szerkesztett, véglegesített brief (ez megy tovább)
     query: null,           // queryBuild output
     candidates: [],        // discover/talent-map normalizált jelöltek
+    // Kizárás a merítésből: az ügyfél saját (volt) emberei + off-limits cégek.
+    // A kizárt jelölt nem törlődik, csak külön sávra kerül, indoklással.
+    exclusions: { companies: [], candidates: {}, allow_alumni: false, client_aliases: [] },
+    strategy_chat: [],     // a stratégia-asszisztens beszélgetés-naplója
     talent_map: null,
     assessments: {},       // candidate_id -> profileAssess
     ranking: null,         // rankTargets output
@@ -84,6 +89,13 @@ export function normalizeProject(p) {
   if (p.baseline_response_rate === undefined) p.baseline_response_rate = null;
   if (p.first_shortlist_at === undefined) p.first_shortlist_at = null;
   if (!p.pilot) p.pilot = { cooling_days: 7, mono_source_threshold: 0.7 };
+  if (p.brief_final === undefined) p.brief_final = null;
+  if (!p.strategy_chat) p.strategy_chat = [];
+  if (!p.exclusions) p.exclusions = {};
+  if (!p.exclusions.companies) p.exclusions.companies = [];
+  if (!p.exclusions.candidates) p.exclusions.candidates = {};
+  if (!p.exclusions.client_aliases) p.exclusions.client_aliases = [];
+  if (p.exclusions.allow_alumni === undefined) p.exclusions.allow_alumni = false;
   return p;
 }
 

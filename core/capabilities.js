@@ -5,7 +5,7 @@
 import { think, brainAvailable } from "./llm.js";
 import { demo } from "./demo.js";
 import { audit } from "./audit.js";
-import { assertRankingComplete, groundAttraction } from "./guardrails.js";
+import { assertRankingComplete, groundAttraction, guardStrategyChat } from "./guardrails.js";
 import { discover as reachDiscover } from "./reach/reachEngine.js";
 
 function J(obj) {
@@ -55,25 +55,111 @@ Kimeneti JSON séma:
 }
 
 // ── 🧠 KERESÉSI TERV ─────────────────────────────────────────
-export async function queryBuild({ intake, brief, position }, { projectId } = {}) {
+export async function queryBuild({ intake, brief, position, briefFinal }, { projectId } = {}) {
+  const client = (position && position.client) || "";
   const task = `FELADAT: Készíts keresési tervet. Boolean lekérdezéseket a szokásos platformokra, ÉS "firecrawl_search_queries" listát, ami a nyilvános webes felkutatást vezérli (Google-stílusú, site: operátorokkal, senior tech / CEE fókusz).
+${LANG}
+KIZÁRÁS — KÖTELEZŐ: az ügyfél saját cége SOHA nem lehet célcég, és a lekérdezésekbe negatív szűrőként be kell kerülnie (pl. -"Ügyfél Neve"). Az ügyfél jelenlegi és volt munkatársait a hiring manager amúgy is ismeri; ha bekerülnek a merítésbe, az a keresés hitelét viszi. Az "exclude_companies" listába vedd fel az ügyfél cégét és a felismerhető leányvállalatait.
+Kimeneti JSON séma:
+{
+ "boolean_queries": [ { "platform": "linkedin-xray|github|google", "query": "<lekérdezés, az ügyfél negatív szűrőjével>" } ],
+ "firecrawl_search_queries": ["<4-5 konkrét kereső-lekérdezés, site: operátorokkal>"],
+ "target_companies": ["<az ügyfél cége NEM szerepelhet itt>"],
+ "target_titles": ["..."],
+ "synonyms": ["..."],
+ "exclude_companies": ["<az ügyfél cége és leányvállalatai — off-limits>"],
+ "exclusion_note": "<egy mondat: kinek a munkatársai maradnak ki a merítésből és miért>"
+}`;
+  // A recruiter által VÉGLEGESÍTETT brief az elsődleges bemenet; az AI-javaslat
+  // csak akkor, ha a véglegesítés még nem történt meg.
+  const basis =
+    briefFinal && briefFinal.text
+      ? {
+          veglegesitett_brief: briefFinal.text,
+          must_haves: briefFinal.must_haves,
+          nice_to_haves: briefFinal.nice_to_haves,
+        }
+      : intake || { brief };
+  const input = `POZÍCIÓ-ÖSSZEFOGLALÓ (a keresés alapja):\n${J(basis)}${positionCtx(position)}${
+    client ? `\n\nAZ ÜGYFÉL CÉGE (kizárandó): ${client}` : ""
+  }`;
+  return run("queryBuild", { task, input, demoInput: { intake, client } }, projectId);
+}
+
+// ── 🧭 STRATÉGIA-ASSZISZTENS ─────────────────────────────────
+// Szűk hatókörű szerkesztő: kizárólag a keresési tervet és a célpiac-térképet
+// módosítja, tételes és visszavonható műveletekkel. Jelöltet nem értékel és
+// megkeresést nem ír — azokra átirányít.
+export function strategySystemPrompt(position) {
+  const pos = position || {};
+  return [
+    "Te a keresési stratégia-asszisztens vagy.",
+    "Hatókör: EGYETLEN megbízás keresési terve (célpozíciók, célcégek, kulcs-szinonimák, kizárt cégek, boolean és webes lekérdezések) és célpiac-térképe (célcégek, versenytárs-klaszterek, közösségek).",
+    "Amit NEM csinálsz: jelöltet nem értékelsz, megkeresést nem írsz, briefet nem elemzel, üzenetet nem küldesz — ezekre átirányítod a recruitert a megfelelő nézetre.",
+    "Minden módosítást tételesen visszajelzel, és a recruiter egy kattintással visszavonhatja.",
+    "Ha nincs elég információd a végrehajtáshoz, javaslatot teszel — de magadtól nem alkalmazod.",
+    "Az ügyfél saját cégét és a kizárt (off-limits) cégeket soha nem javaslod célcégként.",
+    "Megbízás: " + [pos.title, pos.client, pos.location, pos.seniority].filter(Boolean).join(" · "),
+  ].join("\n");
+}
+
+export async function strategyChat({ message, query, talentMap, exclusions, position, history }, { projectId } = {}) {
+  const sys = strategySystemPrompt(position);
+  const task = `${sys}
+
+FELADAT: A recruiter üzenete alapján állítsd elő a végrehajtandó MŰVELETEKET a keresési terven és a célpiac-térképen. Ne írj le prózában olyat, amit művelettel is ki tudsz fejezni.
+
+Művelet-formátum:
+{ "op": "add"|"remove", "target": "query"|"map"|"exclusions", "field": "<mezőnév>", "value": <string, célpiac-cégnél {name,why,likely_roles}>, "label": "<rövid, ember-olvasható címke>" }
+
+Érvényes mezők:
+- target "query":      target_titles | target_companies | synonyms | boolean_queries | firecrawl_search_queries
+- target "map":        target_companies | competitor_clusters | where_they_gather
+- target "exclusions": companies
+
+SZABÁLYOK:
+- "remove"-nál a "value" PONTOSAN egyezzen a JELENLEGI ÁLLAPOT-ban szereplő elemmel. Ha nincs ilyen, ne adj vissza műveletet — a "reply"-ban mondd meg, hogy nem találtad.
+- "add"-nál ne vegyél fel már meglévő elemet; ezt is a "reply"-ban jelezd.
+- Ha a recruiter JAVASLATOT KÉR (kérdez, nem utasít): "actions" ÜRES, a lehetőségek a "proposals" listába kerülnek ugyanebben a formátumban — a recruiter alkalmazza őket egyenként. Magadtól ne írd felül a tervét.
+- Hatókörön kívüli kérésnél (jelölt-értékelés, megkeresés-írás, brief-elemzés) mindkét lista üres, és a "reply"-ban átirányítasz: Jelöltek / Megkeresések / Pozíció és brief.
+- Ha nem tudod eldönteni, melyik listát módosítsd, kérdezz vissza — ne találgass.
 ${LANG}
 Kimeneti JSON séma:
 {
- "boolean_queries": [ { "platform": "linkedin-xray|github|google", "query": "..." } ],
- "firecrawl_search_queries": ["<4-5 konkrét kereső-lekérdezés, site: operátorokkal>"],
- "target_companies": ["..."],
- "target_titles": ["..."],
- "synonyms": ["..."]
+ "reply": "<1-3 mondat: mit tettél vagy mit javasolsz, tételesen>",
+ "actions": [ <művelet> ],
+ "proposals": [ <művelet — csak javaslat, nem alkalmazott> ]
 }`;
-  const input = `JAVASOLT POZÍCIÓ-ÖSSZEFOGLALÓ:\n${J(intake || { brief })}${positionCtx(position)}`;
-  return run("queryBuild", { task, input, demoInput: { intake } }, projectId);
+  const input = `A RECRUITER ÜZENETE:\n${message}\n\nJELENLEGI ÁLLAPOT:\n${J({
+    keresesi_terv: {
+      target_titles: (query && query.target_titles) || [],
+      target_companies: (query && query.target_companies) || [],
+      synonyms: (query && query.synonyms) || [],
+      boolean_queries: (query && query.boolean_queries) || [],
+      firecrawl_search_queries: (query && query.firecrawl_search_queries) || [],
+    },
+    celpiac_terkep: {
+      target_companies: (talentMap && talentMap.target_companies) || [],
+      competitor_clusters: (talentMap && talentMap.competitor_clusters) || [],
+      where_they_gather: (talentMap && talentMap.where_they_gather) || [],
+    },
+    kizart_cegek: (exclusions && exclusions.companies) || [],
+  })}${positionCtx(position)}${
+    (history || []).length ? `\n\nKORÁBBI ÜZENETEK:\n${J((history || []).slice(-6))}` : ""
+  }`;
+  const out = await run(
+    "strategyChat",
+    { task, input, demoInput: { message, query, talentMap, exclusions }, maxTokens: 2000, guard: guardStrategyChat },
+    projectId
+  );
+  out.system_prompt = sys;
+  return out;
 }
 
 // ── 📡 JELÖLTKUTATÁS (Reach Engine) ──────────────────────────
-export async function discoverCandidates({ searchQueries, source, onProgress }, { projectId } = {}) {
+export async function discoverCandidates({ searchQueries, source, onProgress, client }, { projectId } = {}) {
   audit({ capability: "discoverCandidates", projectId, input: { searchQueries, source }, mode: "reach" });
-  const res = await reachDiscover({ searchQueries, source, onProgress });
+  const res = await reachDiscover({ searchQueries, source, onProgress, client });
   return res; // { source, candidates, note }
 }
 

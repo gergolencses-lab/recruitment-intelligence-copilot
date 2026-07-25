@@ -20,11 +20,11 @@ function pickSource(requested) {
  * @param {function} [p.onProgress]
  * @returns {Promise<{source, candidates, note}>}
  */
-export async function discover({ searchQueries, source, onProgress }) {
+export async function discover({ searchQueries, source, onProgress, client }) {
   const chosen = pickSource(source);
 
   if (chosen === "synthetic") {
-    const candidates = await gatherSynthetic();
+    const candidates = await gatherSynthetic(client);
     return {
       source: "synthetic",
       candidates,

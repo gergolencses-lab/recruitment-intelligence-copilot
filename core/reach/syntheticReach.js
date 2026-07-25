@@ -144,23 +144,74 @@ const POOL = [
   },
 ];
 
-let seq = 0;
-export async function gatherSynthetic() {
-  seq = 0;
-  return POOL.map((c) => {
-    seq += 1;
-    return {
-      ...c,
-      id: `syn-${String(seq).padStart(3, "0")}`,
-      synthetic: true,
-      source_url: null,
-      source_type: "synthetic",
-      art14_status: "n/a (mintaadat)",
-      provenance: {
-        method: "synthetic-pool",
-        query: null,
-        fetched_at: new Date().toISOString(),
-      },
-    };
-  });
+// ── Az ügyfélhez kötődő jelöltek ────────────────────────────────────────
+// Az éles kutatás is bedobja őket (a publikus profil publikus marad), ezért a
+// szintetikus merítésben is szerepelnek: a kizárási szabály dolga kiszűrni és
+// megindokolni, nem eltitkolni. Három tipikus eset: jelenlegi munkatárs, volt
+// munkatárs, és leányvállalati/eltérő cégnév-alak.
+function clientInsiders(client) {
+  const cl = client || "(az ügyfél)";
+  return [
+    {
+      id: "syn-cli-01",
+      name: "Deák Zsófia",
+      headline: "Senior Backend Engineer — payments platform",
+      current_company: cl,
+      location: "Budapest, HU",
+      past_companies: ["(régiós ISV)"],
+      signals: [
+        { signal: "3 éve a payments platformon dolgozik", strength: "erős" },
+        { signal: "Belső platform-guild vezetője", strength: "közepes" },
+      ],
+    },
+    {
+      id: "syn-cli-02",
+      name: "Rácz Ábel",
+      headline: "Staff Engineer — core banking integrations",
+      current_company: "(kereskedelmi bank IT-leánya)",
+      location: "Budapest, HU",
+      past_companies: [cl, "(telco digital unit)"],
+      signals: [
+        { signal: "Korábban az ügyfélnél épített fizetési integrációkat", strength: "erős" },
+        { signal: "9 év JVM-ökoszisztéma", strength: "közepes" },
+      ],
+    },
+    {
+      id: "syn-cli-03",
+      name: "Halász Petra",
+      headline: "Engineering Manager — fizetési integrációk",
+      current_company: `${cl} Technologies`,
+      location: "Budapest/Remote, HU",
+      past_companies: [],
+      signals: [
+        { signal: "8 fős integrációs csapatot vezet", strength: "erős" },
+        { signal: "Korábban IC-ként ledger-rendszeren dolgozott", strength: "közepes" },
+      ],
+    },
+  ];
+}
+
+const stamp = (c) => ({
+  past_companies: [],
+  ...c,
+  synthetic: true,
+  source_url: null,
+  source_type: "synthetic",
+  art14_status: "n/a (mintaadat)",
+  provenance: {
+    method: "synthetic-pool",
+    query: null,
+    fetched_at: new Date().toISOString(),
+  },
+});
+
+export async function gatherSynthetic(client) {
+  const pool = POOL.map((c, i) => stamp({ ...c, id: `syn-${String(i + 1).padStart(3, "0")}` }));
+  const ins = clientInsiders(client).map(stamp);
+  // Szétszórva, nem a lista végén: így a prioritási javaslat is felveszi őket,
+  // és látszik, hogy a kizárás valódi, magas prioritású találatokat fog meg.
+  pool.splice(1, 0, ins[0]);
+  pool.splice(4, 0, ins[1]);
+  pool.splice(7, 0, ins[2]);
+  return pool;
 }

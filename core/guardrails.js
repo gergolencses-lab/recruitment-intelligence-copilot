@@ -80,3 +80,43 @@ export function stripSensitive(text) {
   }
   return text;
 }
+
+// ── Stratégia-asszisztens: a műveletek sémára szorítása ─────────────────
+// Az LLM kimenete közvetlenül a keresési tervet és a térképet módosítja, ezért
+// itt vágjuk le az érvénytelen célt/mezőt: ismeretlen mező csendben elrontaná
+// az állapotot. Ami nem fér a sémába, azt eldobjuk, és jelezzük a kimenetben.
+const STRATEGY_FIELDS = {
+  query: ["target_titles", "target_companies", "synonyms", "boolean_queries", "firecrawl_search_queries"],
+  map: ["target_companies", "competitor_clusters", "where_they_gather"],
+  exclusions: ["companies"],
+};
+
+function validStrategyAction(a) {
+  if (!a || (a.op !== "add" && a.op !== "remove")) return false;
+  const fields = STRATEGY_FIELDS[a.target];
+  if (!fields || !fields.includes(a.field)) return false;
+  const v = a.value && typeof a.value === "object" ? a.value.name || a.value.query : a.value;
+  return typeof v === "string" && v.trim().length > 0;
+}
+
+function normStrategyAction(a) {
+  const v = a.value && typeof a.value === "object" ? a.value : String(a.value).trim();
+  const label = String(a.label || (typeof v === "object" ? v.name || v.query : v)).trim();
+  return { op: a.op, target: a.target, field: a.field, value: v, label };
+}
+
+export function guardStrategyChat(out) {
+  const o = out || {};
+  const rawA = Array.isArray(o.actions) ? o.actions : [];
+  const rawP = Array.isArray(o.proposals) ? o.proposals : [];
+  const actions = rawA.filter(validStrategyAction).map(normStrategyAction);
+  const proposals = rawP.filter(validStrategyAction).map(normStrategyAction);
+  const dropped = rawA.length - actions.length + (rawP.length - proposals.length);
+  return {
+    ...o,
+    reply: String(o.reply || "").trim() || "Nem sikerült értelmezni a kérést — nevezd meg, melyik listát módosítsam.",
+    actions,
+    proposals,
+    ...(dropped ? { _dropped_invalid: dropped } : {}),
+  };
+}
