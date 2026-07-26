@@ -62,6 +62,8 @@ npm run mcp                 # stdio MCP szerver
 - **[`product-docs/FOLYAMAT.md`](product-docs/FOLYAMAT.md)** — a folyamat igazság-forrása: folyamatábra (Mermaid), lépésenkénti leírás, és hogy melyik lépés miért így működik. Ha egy lépés viselkedése változik, itt kell először átírni.
 - **[`product-docs/folyamatabra.html`](product-docs/folyamatabra.html)** — ugyanez vizuálisan, egy képernyőn, kattintható lépés-magyarázatokkal. Nyisd meg böngészőben; ügyfélbemutatóhoz és onboardinghoz készült.
 - **[`product-docs/HELP-FAQ-TERV.md`](product-docs/HELP-FAQ-TERV.md)** — a felületi súgó (`?` gombok) és a GYIK terve: hol legyen segítség és hol ne, milyen interakcióval, teljes, másolásra kész szöveggel és implementációs vázlattal.
+- **[`product-docs/VIDEO-SZKRIPTEK.md`](product-docs/VIDEO-SZKRIPTEK.md)** — 13 rövid oktatóvideó szkriptje a lépésekhez (narráció + képernyő-jegyzet + időzítés), ElevenLabs-gyártásra előkészítve (Studio + Avatars/dubbing).
+- **[`product-docs/EXPLAINER-VIDEOK.md`](product-docs/EXPLAINER-VIDEOK.md)** — alternatív, illusztrált/animált gyártási irány 8 videóra összevonva (kreatív brief + narráció + videó-prompt videónként), ElevenLabs Flows-hoz.
 
 ---
 
@@ -132,7 +134,7 @@ core/
   store.js  audit.js  art14.js  llm.js  demo.js  config.js
 app/                     Surface A — Express + statikus UI (public/)
 mcp/                     Surface B — MCP stdio szerver (14 tool)
-product-docs/            folyamat-leírás, vizuális folyamatábra, súgó/GYIK-terv
+product-docs/            folyamat-leírás, vizuális folyamatábra, súgó/GYIK-terv, videó-szkriptek
 scripts/                 smoke.js, test-mcp.js
 ```
 
