@@ -1,4 +1,4 @@
-# Oktatóvideó-szkriptek
+# Oktatóvideó-szkriptek — javított narráció
 
 > Forrás: [`FOLYAMAT.md`](./FOLYAMAT.md) lépés-szövegei, a [`HELP-FAQ-TERV.md`](./HELP-FAQ-TERV.md) súgó-horgonyaihoz kötve.
 > Gyártás: képernyőfelvétel + ElevenLabs (ElevenCreative Studio). **Az ElevenLabs nem vesz fel képernyőt** — a felvétel a te géped dolga, az ElevenLabs a hangot, a feliratot és a lokalizációt adja hozzá.
@@ -109,15 +109,15 @@ Az `mp` oszlop **kumulatív** — ott tartson a videó, amikor az adott mondat e
 
 | mp | Képernyőn | Narráció |
 |---|---|---|
-| 0–8 | Avatar vagy JEL-logó, majd a `folyamatabra.html` teljes nézete | A JEL egy munkatér senior tech pozíciók kereséséhez. A nyers hiring manager-brieftől a rögzített válaszig vezet végig — és minden lépésnél nálad marad a döntés. |
-| 8–22 | Zoom a „Belépés" sávra, majd egy megbízás-kártyára | Egy megbízás egy ügyfél egy konkrét pozíciója. Ha ugyanaz az ügyfél két pozíciót keres, az két megbízás — külön brieffel, külön jelöltekkel, külön eredménnyel. |
-| 22–40 | Az 1. fázis-sáv, kártyák sorban kiemelve | Az első fázis arról szól, mit keresünk. Beilleszted a briefet, az elemzés javaslatot ad, te véglegesíted — és innentől a te változatod megy tovább. Erre épül a keresési terv és a jelöltkutatás. |
-| 40–58 | A 2. fázis-sáv, majd a jelölt-tábla oszlopai | A második fázisban kiderül, kivel beszélünk. A rendszer prioritást javasol, megközelítési tervet ír, üzenetvázlatot ad — a tábla öt oszlopa pedig mindig megmutatja, hol tart egy jelölt. |
-| 58–74 | Zoom a „Megközelítési terv" kártyára, a „tény / feltételezés" jelölésre | Ami a legfontosabb: a rendszer szétválasztja azt, amit a jelöltről forrásból tudunk, attól, amit csak feltételez. A megközelítési ötlet hipotézis, és ezt ki is mondja. |
-| 74–90 | „Amit a rendszer tudatosan NEM csinál" blokk | Üzenetet nem küld — azt te teszed a saját csatornádon. Jelöltet nem utasít el automatikusan. És kitalált tényt nem állít: amit nem lehet forrásra visszavezetni, azt kiszűri. |
-| 90–110 | A 3. fázis-sáv, majd az Eredmények nézet | A végén mérhető eredmény: hány megkeresés ment ki, hányan válaszoltak, és ebből hányan pozitívan — a saját korábbi számaidhoz mérve. Ennyi. A többit lépésenként mutatjuk meg. |
+| 0–8 | Avatar vagy JEL-logó, majd a `folyamatabra.html` teljes nézete | A JEL senior technológiai pozíciók keresését támogató toborzói munkatér. A folyamat minden szakmai döntése nálad marad. |
+| 8–22 | Zoom a „Belépés" sávra, majd egy megbízás-kártyára | Egy megbízás mindig egy ügyfél egy konkrét pozíciójához tartozik. Ha ugyanaz az ügyfél két pozícióra keres embert, az két külön megbízás, saját brieffel, jelölti körrel és eredményekkel. |
+| 22–40 | Az 1. fázis-sáv, kártyák sorban kiemelve | Az első szakaszban pontosítjuk, kit és milyen feladatra keresünk. Beilleszted a pozícióbriefet, a rendszer rendezett javaslatot készít, te pedig ellenőrzöd és jóváhagyod. A további munka már erre a változatra épül. |
+| 40–58 | A 2. fázis-sáv, majd a jelölt-tábla oszlopai | A következő szakaszban összeáll a jelölti kör. A rendszer prioritást és kapcsolatfelvételi megközelítést javasol, majd üzenetvázlatot készít. A jelölti tábla közben mindig mutatja, hol tart az adott személy. |
+| 58–74 | Zoom a „Megközelítési terv" kártyára, a „tény / feltételezés" jelölésre | Fontos különbség, hogy a rendszer elválasztja az ellenőrizhető jelöltinformációkat a lehetséges motivációkra vonatkozó feltételezésektől. A kapcsolatfelvételi ötlet ezért javaslat, nem biztos állítás. |
+| 74–90 | „Amit a rendszer tudatosan NEM csinál" blokk | A rendszer nem küld üzenetet, és nem hoz végleges kiválasztási döntést. A kapcsolatfelvétel előtt mindent te ellenőrzöl. A jelöltre vonatkozó tényállításokat pedig a rendelkezésre álló szakmai jelekhez köti. |
+| 90–110 | A 3. fázis-sáv, majd az Eredmények nézet | Az eredményeknél külön látod a kiküldött megkereséseket, az összes választ és a pozitív válaszokat. Ezeket a saját korábbi válaszadási arányoddal is összevetheted. A következő videókban minden lépést külön bemutatunk. |
 
-**Felirat-kiemelés:** „egy megbízás = egy ügyfél egy pozíciója" · „a te változatod megy tovább" · „a rendszer nem küld"
+**Felirat-kiemelés:** „egy megbízás = egy ügyfél egy pozíciója" · „az ellenőrzött változat megy tovább" · „a JEL nem küld üzenetet"
 
 ---
 
@@ -126,12 +126,12 @@ Az `mp` oszlop **kumulatív** — ott tartson a videó, amikor az adott mondat e
 
 | mp | Képernyőn | Narráció |
 |---|---|---|
-| 0–10 | „Új megbízás" gomb → 1/2 űrlap kitöltése (Northloop, Senior Platform Engineer) | Egy új megbízás két lépés. Először az alapadatok: a pozíció és az ügyfél kötelező, a többi kitölthető később. |
-| 10–18 | Kurzor az „Ügyfél" mezőn, rövid megállás | Az ügyfél neve itt nem formalitás. Ez vezérli később a kizárási szabályt, és negatív szűrőként bekerül a keresési lekérdezésekbe. |
-| 18–28 | 2/2 lépés: a fixture-brief beillesztése → „Megbízás létrehozása" → „Brief elemzése" | Utána jön a nyers brief — pontosan úgy, ahogy a hiring managertől kaptad. Nem kell tisztítani. |
-| 28–45 | Az elemzés kimenete: tisztázandó pontok és feltételezett igények blokk | Az elemzés szétszedi: elengedhetetlen feltételek, előnyök, tisztázandó pontok, feltételezett igények. A tisztázandó pont a hiring managernek szóló kérdés — ellentmondás vagy hiány a briefben. A feltételezett igény viszont a rendszer saját találgatása, ezt neked kell ellenőrizned. |
+| 0–10 | „Új megbízás" gomb → 1/2 űrlap kitöltése (Northloop, Senior Platform Engineer) | Az új megbízás rögzítése két lépésből áll. Először add meg a pozíciót és az ügyfelet. A többi alapadat később is pótolható. |
+| 10–18 | Kurzor az „Ügyfél" mezőn, rövid megállás | Az ügyfél neve a keresést is befolyásolja. A rendszer ennek alapján különíti el az ügyfélhez tartozó találatokat. |
+| 18–28 | 2/2 lépés: a fixture-brief beillesztése → „Megbízás létrehozása" → „Brief elemzése" | Ezután illeszd be a pozícióbriefet úgy, ahogyan a szakmai vezetőtől megkaptad. Előzetesen nem kell átszerkesztened. |
+| 28–45 | Az elemzés kimenete: tisztázandó pontok és feltételezett igények blokk | A rendszer külön rendezi a feltétlen elvárásokat, az előnyt jelentő tapasztalatokat, a tisztázandó kérdéseket és az ellenőrzendő feltételezéseket. A tisztázandó kérdéseket a szakmai vezetővel érdemes megbeszélni. A feltételezéseket pedig neked kell megerősítened vagy elvetned. |
 
-**Felirat-kiemelés:** „az ügyfél neve vezérli a kizárást" · „tisztázandó pont ≠ feltételezett igény"
+**Felirat-kiemelés:** „az ügyfél neve pontosítja a keresést" · „tisztázandó kérdés ≠ feltételezés"
 
 ---
 
@@ -140,12 +140,12 @@ Az `mp` oszlop **kumulatív** — ott tartson a videó, amikor az adott mondat e
 
 | mp | Képernyőn | Narráció |
 |---|---|---|
-| 0–10 | A „Véglegesített brief" kártya, „Vázlat — még nincs véglegesítve" státusszal | Az elemzés eredménye javaslat. A véglegesített brief viszont a tiéd — és ez az, ami továbbmegy. |
-| 10–22 | Szerkesztés a szövegmezőben: egy mondat átírása; egy must-have chip törlése, egy hozzáadása | Írd át a szöveget, vegyél el feltételt, tegyél hozzá. Az AI eredeti javaslata alatta megmarad, ha össze akarod hasonlítani. |
-| 22–34 | „Véglegesítés és jóváhagyás" → a státusz átvált, megjelenik a „szerkesztve" jelölés | Amikor jóváhagyod, ez lesz a hivatkozási alap. Erre épül a keresési terv, a megkeresések és az ügyfél-egyeztetés — nem az AI eredeti kimenetére. |
-| 34–45 | Vissza az Áttekintésre, ahol a véglegesített brief jelenik meg | Itt válik el a javaslat a döntéstől. A rendszernek lehet határozott véleménye — a felelősség attól még a tiéd marad. |
+| 0–10 | A „Véglegesített brief" kártya, „Vázlat — még nincs véglegesítve" státusszal | Az elemzés eredménye még csak javaslat. A véglegesített brief az általad ellenőrzött változat, és a további munka már erre épül. |
+| 10–22 | Szerkesztés a szövegmezőben: egy mondat átírása; egy must-have chip törlése, egy hozzáadása | Módosíthatod a szöveget, törölhetsz egy feltételt, vagy újat adhatsz hozzá. A rendszer eredeti javaslata összehasonlításként továbbra is látható marad. |
+| 22–34 | „Véglegesítés és jóváhagyás" → a státusz átvált, megjelenik a „szerkesztve" jelölés | A jóváhagyás után ez lesz a keresési stratégia, a kapcsolatfelvétel és az ügyfél-egyeztetés közös hivatkozási alapja. Nem a rendszer eredeti javaslata, hanem a te végleges változatod. |
+| 34–45 | Vissza az Áttekintésre, ahol a véglegesített brief jelenik meg | Ezen a ponton válik el egyértelműen a rendszer javaslata és a toborzó szakmai döntése. A jóváhagyás és a felelősség nálad marad. |
 
-**Felirat-kiemelés:** „a te változatod megy tovább" · „javaslat ≠ döntés"
+**Felirat-kiemelés:** „az ellenőrzött változat megy tovább" · „javaslat ≠ döntés"
 
 ---
 
@@ -154,12 +154,12 @@ Az `mp` oszlop **kumulatív** — ott tartson a videó, amikor az adott mondat e
 
 | mp | Képernyőn | Narráció |
 |---|---|---|
-| 0–10 | Célpiac nézet, ① TERV kártya → „Keresési terv készítése" | A keresési terv adja a kutatás alapját: célpozíciók, célcégek, kulcs-szinonimák és a lekérdezések, amikkel a rendszer keres. |
-| 10–24 | Célpozíciókhoz hozzáadás, célcégek közül egy törlése | Minden kategóriához adhatsz hozzá, és bármit elvehetsz. Ez nem végleges kimenet, hanem közös munkadarab. |
-| 24–38 | „Keresési terv frissítése" → a kézi elem megmarad, a törölt nem jön vissza | És itt jön a lényeg: a frissítés egyesít, nem töröl. A kézzel felvett elemeid megmaradnak — amit pedig kivettél, azt a rendszer megjegyzi, és nem hozza vissza csendben. |
-| 38–50 | A „Keresési lekérdezések" blokk lenyitása | A tényleges lekérdezések is szerkeszthetők. Ha tiszta lapot akarsz, arra van az „Új terv nulláról" — az viszont mindent elvet, és rá is kérdez. |
+| 0–10 | Célpiac nézet, ① TERV kártya → „Keresési terv készítése" | A keresési stratégia határozza meg a jelöltkutatás irányát: a célpozíciókat, a célcégeket, a kapcsolódó szakmai kifejezéseket és a keresések szövegét. |
+| 10–24 | Célpozíciókhoz hozzáadás, célcégek közül egy törlése | Bármelyik listát kiegészítheted vagy szűkítheted. Ez egy közösen alakítható munkadokumentum, nem változtatás nélkül elfogadandó rendszerkimenet. |
+| 24–38 | „Keresési terv frissítése" → a kézi elem megmarad, a törölt nem jön vissza | Frissítéskor a rendszer megtartja a kézzel hozzáadott elemeket. A korábban eltávolított javaslatokat sem teszi vissza automatikusan, így a saját módosításaid nem vesznek el. |
+| 38–50 | A „Keresési lekérdezések" blokk lenyitása | Magukat a kereséseket is szerkesztheted. Az „Új terv nulláról" lehetőséggel teljesen új javaslatot kérhetsz. Mivel ez elveti a korábbi módosításokat, a rendszer előtte megerősítést kér. |
 
-**Felirat-kiemelés:** „a frissítés egyesít, nem töröl" · „a kézi törlést megjegyzi"
+**Felirat-kiemelés:** „a saját módosításaid megmaradnak" · „új tervnél megerősítést kér"
 
 ---
 
@@ -168,9 +168,9 @@ Az `mp` oszlop **kumulatív** — ott tartson a videó, amikor az adott mondat e
 
 | mp | Képernyőn | Narráció |
 |---|---|---|
-| 0–10 | ② TÉRKÉP kártya → „Célpiac-térkép készítése" | A keresési terv azt mondja meg, hogyan keresünk. A célpiac-térkép azt, hogy hol. |
-| 10–22 | A célcég-lista indoklásokkal, klaszterek, közösségek | Célcégek indoklással és valószínű szerepekkel, versenytárs-klaszterek, és hogy hol találkoznak ezek az emberek — közösségek, konferenciák. Kézzel is felvehetsz céget. |
-| 22–30 | Váltás az Áttekintésre, a „Célcég-lefedettség" sorra | A térkép később is dolgozik: ebből számolja a rendszer, hány célcéget érintett már a merítésed. |
+| 0–10 | ② TÉRKÉP kártya → „Célpiac-térkép készítése" | A keresési stratégia azt határozza meg, hogyan keresünk. A célpiaci áttekintés pedig azt mutatja meg, hol érdemes keresnünk. |
+| 10–22 | A célcég-lista indoklásokkal, klaszterek, közösségek | Megjelennek a javasolt célcégek, a náluk várható releváns szerepek, a kapcsolódó vállalatcsoportok, valamint a szakmai közösségek és rendezvények. A listát kézzel is kiegészítheted. |
+| 22–30 | Váltás az Áttekintésre, a „Célcég-lefedettség" sorra | Később ehhez a listához viszonyítja a kutatást, és jelzi, mely célcégekből van találat, illetve hol maradt hiány. |
 
 ---
 
@@ -179,10 +179,10 @@ Az `mp` oszlop **kumulatív** — ott tartson a videó, amikor az adott mondat e
 
 | mp | Képernyőn | Narráció |
 |---|---|---|
-| 0–10 | Jelöltek nézet a kutatás után, a „…jelölt nem került a listára" sáv | A merítésből automatikusan kimaradnak azok, akiket a hiring manager amúgy is ismer: az ügyfél jelenlegi és volt munkatársai. |
-| 10–24 | A „Kizárva a merítésből" sáv kinyitása — **Deák Zsófia**, **Rácz Ábel**, **Halász Petra** sorai, az indoklásokkal | Itt van mind a három eset. Aki most a Northloopnál dolgozik. Aki korábban ott dolgozott. És aki a Northloop Technologiesnál — a cégnév-egyezés a leányvállalati és rövidített alakokat is felismeri. |
-| 24–36 | Kurzor a „Mégis bevonom" gombon, majd kattintás, a jelölt visszakerül | És ami legalább ennyire fontos: a kizárás nem törlés. A találat megmarad, indoklással, és egy kattintással visszahozod. |
-| 36–50 | Célpiac nézet, kizárás-kártya: off-limits cég hozzáadása, alumni-kapcsoló | A szabályokat itt állítod: felvehetsz további off-limits cégeket, megadhatod az ügyfél más cégneveit, és ha szándékosan visszacsábítanátok volt munkatársakat, egy kapcsolóval visszaengeded az alumnikat. |
+| 0–10 | Jelöltek nézet a kutatás után, a „…jelölt nem került a listára" sáv | A rendszer külön kezeli az ügyfél jelenlegi és korábbi munkatársait, mert őket a szakmai vezető jellemzően már ismeri. |
+| 10–24 | A „Kizárva a merítésből" sáv kinyitása — **Deák Zsófia**, **Rácz Ábel**, **Halász Petra** sorai, az indoklásokkal | A példában három eset látható: jelenlegi munkatárs, korábbi munkatárs, valamint az ügyfél egy kapcsolódó cégnév alatt szereplő munkatársa. Mindegyik mellett megjelenik a kizárás indoka. |
+| 24–36 | Kurzor a „Mégis bevonom" gombon, majd kattintás, a jelölt visszakerül | A kizárás nem jelent törlést. A találat külön listán, indoklással együtt megmarad, és a „Mégis bevonom" lehetőséggel visszahelyezhető a jelölti körbe. |
+| 36–50 | Célpiac nézet, kizárás-kártya: off-limits cég hozzáadása, alumni-kapcsoló | Itt további kizárt cégeket és alternatív ügyfélneveket is megadhatsz. Azt is beállíthatod, hogy az ügyfél korábbi munkatársai bekerülhetnek-e a keresésbe. |
 
 **Felirat-kiemelés:** „a kizárás nem törlés" · „egy kattintással visszahozható"
 
@@ -193,12 +193,12 @@ Az `mp` oszlop **kumulatív** — ott tartson a videó, amikor az adott mondat e
 
 | mp | Képernyőn | Narráció |
 |---|---|---|
-| 0–10 | A Stratégia-asszisztens szekció, a „Rendszer-prompt" blokk lenyitva | Ez nem általános chat. Egyetlen dolgot csinál: szerkeszti a keresési tervet és a célpiac-térképet. A rendszer-promptja megnyitható — ott látod, mit tud és mit nem. |
-| 10–24 | Utasítás beírása: „Adj hozzá a célpozíciókhoz: Head of Platform" → a művelet-chip megjelenik | Ha utasítasz, végrehajtja, és tételesen visszajelzi, mit tett. |
-| 24–36 | „↺ Visszavonás" kattintás, a módosítás visszaáll | Minden lépés visszavonható. Nem kell megbíznod benne ahhoz, hogy használd. |
-| 36–50 | Kérdés beírása: „Milyen célcégeket javasolsz még?" → javaslat-chipek, egy alkalmazása | Ha kérdezel, magától nem nyúl semmihez: javaslatokat ad, és te alkalmazod őket egyenként. Jelöltet nem értékel és üzenetet nem ír — arra átirányít. |
+| 0–10 | A Stratégia-asszisztens szekció, a „Rendszer-prompt" blokk lenyitva | A Stratégia-asszisztens kizárólag a keresési terv és a célpiaci áttekintés módosításában segít. A lenyitható leírásban pontosan látható, mire használható. |
+| 10–24 | Utasítás beírása: „Adj hozzá a célpozíciókhoz: Head of Platform" → a művelet-chip megjelenik | Egyértelmű utasítás esetén elvégzi a módosítást, majd tételesen megmutatja, mit adott hozzá vagy mit távolított el. |
+| 24–36 | „↺ Visszavonás" kattintás, a módosítás visszaáll | Minden változtatás külön látható és visszavonható. Így a keresési stratégia módosításai végig ellenőrizhetők maradnak. |
+| 36–50 | Kérdés beírása: „Milyen célcégeket javasolsz még?" → javaslat-chipek, egy alkalmazása | Ha kérdést teszel fel, a rendszer nem módosít automatikusan. Javaslatokat ad, amelyeket egyenként fogadhatsz el. Jelöltértékelést vagy üzenetírást ezen a felületen nem végez. |
 
-**Felirat-kiemelés:** „minden módosítás visszavonható" · „kérdésre javasol, nem csinál"
+**Felirat-kiemelés:** „minden módosítás visszavonható" · „kérdésre javasol, nem módosít"
 
 ---
 
@@ -207,12 +207,12 @@ Az `mp` oszlop **kumulatív** — ott tartson a videó, amikor az adott mondat e
 
 | mp | Képernyőn | Narráció |
 |---|---|---|
-| 0–10 | ③ KUTATÁS kártya, a forrás-választó lenyitva | A kutatás a keresési terv webes lekérdezéseivel dolgozik. Előbb terv kell — addig a gomb inaktív. |
-| 10–24 | A három forrás-opció végigmutatása | Három forrás közül választhatsz. Az élő valódi keresés a nyilvános weben, jellemzően húsz-negyven másodperc. A mintaadatok egy tizennégy fős készlet — nem valós személyek, bemutatóhoz. Az automatikus élőt használ, ha van hozzá kulcs. |
-| 24–38 | Futtatás → a találati lista, egy jelölt megnyitása a jelek és a forrás-link mutatásával | A találatokból normalizált jelölt-rekord lesz: jelek, forrás-hivatkozás, és GDPR-státusz. Minden állításnál látod, honnan jön. |
-| 38–55 | Vissza a listára, egy LinkedIn-forrású találat mellett megállás | Egy dolgot fontos tudni: nincs belépett LinkedIn-scraping. A LinkedIn-találatok a keresőből jönnek, a profil-oldal bejelentkezés mögött van — onnan csak a kereső-kivonat marad. A valódi mélységet a szabadon elérhető források adják: GitHub, cég-oldalak, konferencia-biók, blogok. |
+| 0–10 | ③ KUTATÁS kártya, a forrás-választó lenyitva | A jelöltkutatás a jóváhagyott keresési stratégiára épül. Amíg ez nem készült el, a kutatás nem indítható. |
+| 10–24 | A három forrás-opció végigmutatása | Három mód közül választhatsz. Az élő keresés nyilvános forrásokat vizsgál, és általában húsz-negyven másodpercig tart. A mintaadatok nem valós személyek, ezért bemutatóhoz valók. Automatikus módban a rendszer az elérhető beállítás alapján választ. |
+| 24–38 | Futtatás → a találati lista, egy jelölt megnyitása a jelek és a forrás-link mutatásával | A találatokból egységes jelölti profil készül. Láthatók rajta az értékeléshez használható szakmai jelek, az eredeti forrás és az adatvédelmi tájékoztatás állapota. |
+| 38–55 | Vissza a listára, egy LinkedIn-forrású találat mellett megállás | A rendszer nem lép be zárt LinkedIn-profilokba, és nem használ álprofilt. A LinkedInhez kapcsolódó találatokból csak a keresőben nyilvánosan megjelenő információt használja. Részletesebb adatokat más nyilvános szakmai forrásokból, például fejlesztői oldalakról, vállalati bemutatkozásokból, konferencia-életrajzokból és szakmai blogokból gyűjt. |
 
-**Felirat-kiemelés:** „nincs belépett LinkedIn-scraping" · „az ismételt futtatás hozzáad, nem ír felül"
+**Felirat-kiemelés:** „nincs hozzáférés zárt LinkedIn-profilokhoz" · „az új futtatás hozzáad, nem ír felül"
 
 ---
 
@@ -221,12 +221,12 @@ Az `mp` oszlop **kumulatív** — ott tartson a videó, amikor az adott mondat e
 
 | mp | Képernyőn | Narráció |
 |---|---|---|
-| 0–12 | „Prioritási javaslat készítése" → a tábla feltöltődik A/B/C/D szerint | A rendszer prioritást javasol: A — elsőként keresd meg, B — következő kör, C — figyelőlista, D — most nem javasolt. Mindegyik mellett rövid indoklás. |
-| 12–26 | Görgetés a Figyelőlista sávra, egy D-jelölt indoklásának mutatása | A gyenge jelölt nem tűnik el. Megkapja a D-t, indoklással, és a figyelőlistán marad. Ez szándékos: ha valaki némán kiesne, a lista nem lenne elszámoltatható. |
-| 26–38 | Prioritás átállítása a kártyán A-ról B-re, a „kézzel" jelölés megjelenése | A javaslatot bármikor felülírod. A te beállításod győz, és a felület jelzi, hogy kézzel állítottad. |
-| 38–55 | Vízszintes végigmutatás az öt oszlopon, majd zoom egy kártya aljára | A tábla öt oszlopa maga a folyamat: rangsorolatlan, előkészítés, jóváhagyás és küldés, kiküldve, válaszolt. Egy jelölt mindig pontosan egy oszlopban van, és a kártya alján ott a következő lépése. |
+| 0–12 | „Prioritási javaslat készítése" → a tábla feltöltődik A/B/C/D szerint | A rendszer A, B, C vagy D prioritást javasol. Az A és B a megkeresési sorrendet, a C a figyelőlistát, a D a nem javasolt jelölteket jelöli. |
+| 12–26 | Görgetés a Figyelőlista sávra, egy D-jelölt indoklásának mutatása | Az alacsonyabb prioritású jelölt sem tűnik el a listából. A D kategóriában, az indoklással együtt továbbra is látható marad. Így minden feldolgozott jelöltről ellenőrizhető javaslat készül. |
+| 26–38 | Prioritás átállítása a kártyán A-ról B-re, a „kézzel" jelölés megjelenése | A javasolt prioritást bármikor felülírhatod. Az általad beállított érték lesz érvényes, a felület pedig külön jelzi a kézi módosítást. |
+| 38–55 | Vízszintes végigmutatás az öt oszlopon, majd zoom egy kártya aljára | A jelölti tábla öt fő állapotot mutat: rangsorolatlan, előkészítés alatt, jóváhagyásra vár, megkeresve és válaszolt. Egy jelölt egyszerre egy oszlopban szerepel, a kártyáján pedig mindig látható a következő feladat. |
 
-**Felirat-kiemelés:** „senki nem esik ki némán" · „a te beállításod győz"
+**Felirat-kiemelés:** „minden jelölt látható marad" · „a kézi beállítás az érvényes"
 
 ---
 
@@ -235,13 +235,13 @@ Az `mp` oszlop **kumulatív** — ott tartson a videó, amikor az adott mondat e
 
 | mp | Képernyőn | Narráció |
 |---|---|---|
-| 0–10 | Jelöltpanel → Megközelítés fül → „Megközelítési terv készítése" | Ez a videó arról szól, amit a felület magától nehezen mond el: hogy a rendszer szétválasztja a tényt a feltételezéstől. |
-| 10–26 | Az „Amit tudunk" blokk, zoom egy tényre és a mellette lévő jel-hivatkozásra | Az első rész az, amit a jelöltről biztosan tudunk. Minden állítás mellett ott a jel, amiből származik. Ha nincs mellette forrás, nem kerül ide. |
-| 26–36 | Az „Amit nem tudunk" lista és a bizonyosság-jelzés | Alatta pedig az, amit nem tudunk: a motivációja, a fizetése, hogy elégedett-e most. Ezt a rendszer nem találja ki. |
-| 36–52 | A „Megközelítési javaslat" blokk, az „Ellenőrizendő feltételezés" címkén megállás, majd a nyitómondat-ötlet | A második rész három megközelítési ötlet, rangsorolva — a legerősebb konkrét nyitómondat-javaslattal. Ezek szükségszerűen feltételezések: a jelölt motivációját nem ismerjük. A rendszer ezt kimondja, nem álcázza magabiztos állításnak. |
-| 52–60 | A „nem-visszavezethető állítás kiszűrve" sor, ha látszik; különben a „Kerülendő megközelítések" blokk | És ha az elemzés mégis írna olyan tényt, amit nem lehet a jelölt jeleire visszavezetni, azt egy ellenőrzés utólag kiszedi — és megmondja, hányat dobott. |
+| 0–10 | Jelöltpanel → Megközelítés fül → „Megközelítési terv készítése" | A kapcsolatfelvételi megközelítés kétféle információt választ szét: az ellenőrizhető tényeket és a beszélgetésben tesztelendő feltételezéseket. |
+| 10–26 | Az „Amit tudunk" blokk, zoom egy tényre és a mellette lévő jel-hivatkozásra | Az első rész kizárólag a jelöltről rendelkezésre álló szakmai jelekre épül. Minden állítás mellett látható, melyik információ támasztja alá. |
+| 26–36 | Az „Amit nem tudunk" lista és a bizonyosság-jelzés | Külön listán jelenik meg az is, amit a forrásokból nem tudunk, például a jelölt motivációja, fizetési igénye vagy jelenlegi elégedettsége. |
+| 36–52 | A „Megközelítési javaslat" blokk, az „Ellenőrizendő feltételezés" címkén megállás, majd a nyitómondat-ötlet | Ezután három lehetséges kapcsolatfelvételi irány következik, fontossági sorrendben. A legerősebbhez konkrét nyitómondat-javaslat is tartozik. Ezek nem biztos állítások a jelöltről, hanem ellenőrzésre váró szakmai feltételezések. |
+| 52–60 | A „nem-visszavezethető állítás kiszűrve" sor, ha látszik; különben a „Kerülendő megközelítések" blokk | Beépített ellenőrzés távolítja el a szakmai jellel nem alátámasztott tényállításokat. A felület jelzi, ha történt ilyen szűrés. |
 
-**Felirat-kiemelés:** „minden tény mellett ott a forrás" · „a megközelítés hipotézis — és ezt ki is mondja"
+**Felirat-kiemelés:** „minden tény mellett látható az alátámasztás" · „a megközelítés ellenőrzendő feltételezés"
 
 ---
 
@@ -250,12 +250,12 @@ Az `mp` oszlop **kumulatív** — ott tartson a videó, amikor az adott mondat e
 
 | mp | Képernyőn | Narráció |
 |---|---|---|
-| 0–12 | Üzenet fül → „Üzenetvázlat készítése" → a kész vázlat, zoom az első mondatra | A megközelítési tervből személyre szabott üzenetvázlat lesz. Az első mondat a jelölt saját munkájához kapcsolódik — ez az, ami elválasztja a sablonlevéltől. |
-| 12–24 | Szerkesztés a szövegmezőben → „Jóváhagyva ✓" | Szerkeszd szabadon, aztán hagyd jóvá. Így később is látod, melyik vázlat ment át ellenőrzésen. |
-| 24–38 | „Másolás" → váltás egy e-mail-ablakra (vagy csak a gombra zoom) → vissza → „Kiküldés rögzítése" | Aztán kimásolod, és a saját csatornádon küldöd el. **A rendszer soha nem küld semmit.** Itt csak rögzíted, hogy kiment. |
-| 38–50 | A válasz-gombok: pozitív / semleges / negatív, egy megjelölése | Amikor megjön a válasz, itt jelölöd — pozitív, semleges vagy negatív. Ebből épülnek később az eredmények, és az első pozitív válasz nyitja meg az interjútervet. |
+| 0–12 | Üzenet fül → „Üzenetvázlat készítése" → a kész vázlat, zoom az első mondatra | A jóváhagyott megközelítésből személyre szabott üzenetvázlat készül. A nyitómondat a jelölt egy konkrét szakmai jeléhez kapcsolódik, ezért nem általános sablonként hat. |
+| 12–24 | Szerkesztés a szövegmezőben → „Jóváhagyva ✓" | Az üzenetet elküldés előtt szabadon szerkesztheted. A jóváhagyás rögzítésével később is látható, melyik változat kapott szakmai ellenőrzést. |
+| 24–38 | „Másolás" → váltás egy e-mail-ablakra (vagy csak a gombra zoom) → vissza → „Kiküldés rögzítése" | A jóváhagyott szöveget kimásolod, majd a saját e-mail- vagy közösségi csatornádon küldöd el. A JEL nem küld üzenetet. A felületen csak a megtörtént kapcsolatfelvételt rögzíted. |
+| 38–50 | A válasz-gombok: pozitív / semleges / negatív, egy megjelölése | A jelölt válaszát pozitív, semleges vagy negatív eredménnyel rögzítheted. Ezekből az adatokból készülnek az eredménymutatók, és az első pozitív válasz után válik elérhetővé az interjúterv. |
 
-**Felirat-kiemelés:** „a rendszer soha nem küld" · „a kiküldés a te csatornádon"
+**Felirat-kiemelés:** „a JEL nem küld üzenetet" · „a kiküldés a te csatornádon történik"
 
 ---
 
@@ -264,11 +264,11 @@ Az `mp` oszlop **kumulatív** — ott tartson a videó, amikor az adott mondat e
 
 | mp | Képernyőn | Narráció |
 |---|---|---|
-| 0–12 | Üzenet fül alja → „GDPR Art. 14 értesítő" gomb → a generált sablon | Ha publikus forrásból kutatsz jelöltet, adatkezelővé válsz. A GDPR tizennegyedik cikke ilyenkor tájékoztatási kötelezettséget ír elő. |
-| 12–24 | Görgetés a sablonon: adatkezelő, adatok forrása, jogalap, jogok | A sablon végigmegy a kötelező pontokon: ki az adatkezelő, milyen adatot kezel, honnan szerezte, milyen célból és milyen jogalapon, és milyen jogai vannak az érintettnek. |
-| 24–35 | A jelölt profilján a `pending_notice` státusz | A cégadatokat és az érdekmérlegelést neked kell kitöltened, és skálázás előtt jogásszal átnézetni — ez sablon, nem jogi tanács. A határidő a megszerzéstől számított egy hónap, vagy az első kapcsolatfelvétel. |
+| 0–12 | Üzenet fül alja → „GDPR Art. 14 értesítő" gomb → a generált sablon | Ha a szervezet nyilvános forrásból gyűjtött jelöltadatokat kezel kiválasztási célra, adatvédelmi kötelezettségei keletkeznek. Ezek közé tartozhat a GDPR tizennegyedik cikke szerinti tájékoztatás. |
+| 12–24 | Görgetés a sablonon: adatkezelő, adatok forrása, jogalap, jogok | A szerkeszthető minta tartalmazza az adatkezelő adatait, a kezelt adatok körét és forrását, az adatkezelés célját és jogalapját, valamint az érintett jogaira vonatkozó tájékoztatást. |
+| 24–35 | A jelölt profilján a `pending_notice` státusz | A minta nem jogi tanács. A tájékoztatást főszabály szerint legkésőbb egy hónapon belül kell megadni. Korábbi kapcsolatfelvételnél a határidő az első kommunikáció időpontja. |
 
-**Felirat-kiemelés:** „sablon, nem jogi tanács" · „1 hónap vagy az első kapcsolatfelvétel"
+**Felirat-kiemelés:** „minta, nem jogi tanács" · „egy hónapon belül, vagy az első kommunikációkor"
 
 ---
 
@@ -277,9 +277,9 @@ Az `mp` oszlop **kumulatív** — ott tartson a videó, amikor az adott mondat e
 
 | mp | Képernyőn | Narráció |
 |---|---|---|
-| 0–12 | Eredmények nézet, a három felső mutató | Három szám: hány megkeresés ment ki, hányan válaszoltak, és ebből hányan pozitívan. |
-| 12–24 | Zoom a „Pozitív válaszok aránya" kártyára | A válaszarány és a pozitív arány szándékosan külön mutató. Az elutasítás is válasz — ami számít, hány beszélgetés indul el. |
-| 24–40 | A „Korábbi kézi válaszarány" mező kitöltése → az eltérés megjelenik; majd a „Shortlist kész" gomb | Ha megadod a saját korábbi válaszarányodat, a rendszer ehhez méri magát, és kiírja az eltérést. Minden szám a te rögzítéseidből épül: a rendszer nem küld, tehát kitalált számot sem mutat. |
+| 0–12 | Eredmények nézet, a három felső mutató | Az eredményeknél három alapadat látható: a kiküldött megkeresések száma, a válaszadási arány és a pozitív válaszok aránya. |
+| 12–24 | Zoom a „Pozitív válaszok aránya" kártyára | A válaszadási arány és a pozitív válaszok aránya külön mutató. Az elutasítás is válasznak számít, ezért a két érték együtt mutatja meg, hány érdemi beszélgetés indult el. |
+| 24–40 | A „Korábbi kézi válaszarány" mező kitöltése → az eltérés megjelenik; majd a „Shortlist kész" gomb | Ha megadod a korábbi, kézi keresések válaszadási arányát, a felület összehasonlítja vele az aktuális eredményt. Minden mutató az általad rögzített kiküldésekből és válaszokból készül. |
 
 **Felirat-kiemelés:** „az elutasítás is válasz" · „minden szám a te rögzítéseidből"
 
