@@ -7,8 +7,11 @@ const state = {
   projectId: null, project: null, status: null,
   view: "home", homeFilter: "aktiv",
   candFilter: { prio: "", state: "", q: "" },
-  orOpen: null,        // megkeresés-szerkesztőben nyitott jelölt
-  drawerId: null,      // jelölt-részletpanelben nyitott jelölt
+  candView: "board",   // board | list — a tábla az alapértelmezés
+  drawerId: null,      // a jelöltpanelben nyitott jelölt
+  panelTab: "profil",  // profil · megkozelites · uzenet · naplo
+  notesOpen: false,    // a napló-fiók nyitva van-e
+  moreOpen: false,     // az alsó „⋯ Több” lap nyitva van-e
   newEngStep: 0,       // 0 = zárva, 1 = alapadatok, 2 = brief
   openExcluded: false, // a kizárt jelöltek sávja nyitva nyíljon-e
 };
@@ -70,7 +73,7 @@ function lsSave(p) {
 function lsGet(id) { return lsAll()[id] || null; }
 function lsListFull() { return Object.values(lsAll()).sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || "")); }
 function persist() { if (state.project) lsSave(state.project); }
-function saveUi() { try { localStorage.setItem(UI_KEY, JSON.stringify({ projectId: state.projectId, view: state.view, homeFilter: state.homeFilter })); } catch {} }
+function saveUi() { try { localStorage.setItem(UI_KEY, JSON.stringify({ projectId: state.projectId, view: state.view, homeFilter: state.homeFilter, candView: state.candView })); } catch {} }
 function loadUi() { try { return JSON.parse(localStorage.getItem(UI_KEY) || "{}"); } catch { return {}; } }
 
 function emptyProjectJS(id, name) {
@@ -306,55 +309,142 @@ function orState(p, id) {
 }
 function candById(p, id) { return ((p && p.candidates) || []).find((c) => c.id === id); }
 
-// A/B prioritású jelöltek munkalistája (a felülbírálatokkal együtt)
+/* ── ÁLLAPOT-LÉTRA ───────────────────────────────────────────────────────
+   Egyetlen hely mondja meg, hol tart egy jelölt. Korábban ugyanez a létra
+   több helyen volt kézzel újraírva, eltérő sorrendben — ebből származott,
+   hogy a felület több, egymásnak ellentmondó sorrendet tanított.
+   A kulcsok finomak; a felület ezekből durvít oszlopokra.                */
+const STAGE_LABEL = {
+  kizart: "kizárva a merítésből",
+  rangsorolatlan: "prioritás beállítása",
+  figyelo: "figyelőlista",
+  elvetve: "most nem javasolt",
+  nincs_terv: "megközelítési terv készítése",
+  nincs_vazlat: "üzenetvázlat készítése",
+  jovahagyasra: "vázlat ellenőrzése",
+  kuldesre: "kiküldés rögzítése",
+  kikuldve: "válaszra vár",
+  valaszolt: "folyamatban",
+};
+// A kizárás mindent megelőz: van A prioritású jelölt, aki az ügyfélnél dolgozik.
+function candStage(p, c) {
+  if (!c) return "rangsorolatlan";
+  if (isExcluded(p, c)) return "kizart";
+  const t = effTier(p, c.id);
+  if (!t) return "rangsorolatlan";
+  if (t === "C") return "figyelo";
+  if (t === "D") return "elvetve";
+  const s = orState(p, c.id);
+  if (!s.hasAttr) return "nincs_terv";
+  if (!s.hasDraft) return "nincs_vazlat";
+  if (!s.reviewed && !s.sent) return "jovahagyasra";
+  if (!s.sent) return "kuldesre";
+  if (!s.replied) return "kikuldve";
+  return "valaszolt";
+}
+// Egy jelölt teljes, származtatott sora. Semmit nem tárol — minden mező a
+// meglévő projekt-mezőkből számolódik.
+function candRow(p, c, ranked) {
+  const id = c.id;
+  const r = ranked || ((p.ranking && p.ranking.ranked) || []).find((x) => x.candidate_id === id) || {};
+  return {
+    id, cand: c,
+    tier: effTier(p, id),
+    stage: candStage(p, c),
+    excluded: isExcluded(p, c),
+    priority: F.prio(r),
+    reason: F.strength((p.assessments || {})[id]) || shorten(r.rationale, 88),
+    ...orState(p, id),
+    touched: daysSince(c.last_touched),
+  };
+}
+// A tábla öt oszlopa és két sávja. Minden jelölt pontosan egy vödörbe kerül.
+const STAGE_BUCKET = {
+  kizart: "kizart",
+  rangsorolatlan: "rangsorolatlan",
+  figyelo: "figyelolista", elvetve: "figyelolista",
+  nincs_terv: "elokeszites", nincs_vazlat: "elokeszites",
+  jovahagyasra: "jovahagyasra", kuldesre: "jovahagyasra",
+  kikuldve: "kikuldve",
+  valaszolt: "valaszolt",
+};
+function boardBuckets(p) {
+  const out = { rangsorolatlan: [], elokeszites: [], jovahagyasra: [], kikuldve: [], valaszolt: [], figyelolista: [], kizart: [] };
+  for (const c of (p && p.candidates) || []) out[STAGE_BUCKET[candStage(p, c)]].push(candRow(p, c));
+  return out;
+}
+
+// A/B prioritású jelöltek munkalistája (a felülbírálatokkal együtt).
+// A rangsor sorrendjében iterál — a stabil sorrend a lista sajátja.
 function pipelineRows(p) {
   const ranked = (p.ranking && p.ranking.ranked) || [];
   const coolDays = (p.pilot && p.pilot.cooling_days) || 7;
   const rows = [];
   for (const r of ranked) {
-    const id = r.candidate_id;
-    const tier = effTier(p, id);
-    if (tier !== "A" && tier !== "B") continue;
-    const cand = candById(p, id) || {};
-    if (isExcluded(p, cand)) continue;   // kizárt jelölt nem kerül a munkalistára
-    const os = orState(p, id);
-    rows.push({
-      id, cand, tier, priority: F.prio(r),
-      reason: F.strength((p.assessments || {})[id]) || shorten(r.rationale, 88),
-      ...os,
-      touched: daysSince(cand.last_touched),
-    });
+    const cand = candById(p, r.candidate_id);
+    if (!cand) continue;
+    const row = candRow(p, cand, r);
+    if (row.tier !== "A" && row.tier !== "B") continue;
+    if (row.excluded) continue;          // kizárt jelölt nem kerül a munkalistára
+    rows.push(row);
   }
   rows.sort((a, b) => (a.priority || 99) - (b.priority || 99));
   return { rows, coolDays };
 }
 
-// ── Következő teendő (megbízásonként egy kiemelt lépés) ─────────────────
+/* ── Következő teendő (megbízásonként egy kiemelt lépés) ─────────────────
+   Szabálytábla, nem if-létra: a szabályok sorrendben értékelődnek, az első
+   találó nyer. Így egy nézet átnevezése egy mező átírása, nem vezérlési
+   szerkezet átszabása.                                                   */
+// Kihűlés: kiküldött megkeresés, amire régóta nincs válasz és nincs lépés.
+// Korábban a „következő teendő” és a „figyelmet igényel” eltérő feltételt
+// használt (sent vs. hasAttr) — ugyanarra a fogalomra, két helyen.
+function isCooling(r, coolDays) {
+  return r.sent && !r.replied && (r.touched == null || r.touched > coolDays);
+}
+const NEXT_STEP_RULES = [
+  { when: (x) => !x.p.brief_raw && !x.p.intake, view: "pozicio", cta: "Pozíció és brief",
+    label: () => "Illeszd be a briefet, majd futtasd az elemzést", sub: () => "A megbízás a brief tisztázásával indul" },
+  { when: (x) => !x.p.intake, view: "pozicio", cta: "Pozíció és brief",
+    label: () => "Brief elemzése", sub: () => "A brief megvan — kérj javasolt pozíció-összefoglalót" },
+  { when: (x) => !x.c.length && x.p.intake_review !== "approved", view: "pozicio", cta: "Pozíció és brief",
+    label: () => "Véglegesítsd a briefet", sub: () => "Szerkeszd a javaslatot, és hagyd jóvá — erre épül a keresés" },
+  { when: (x) => !x.c.length && !x.p.query, view: "celpiac", cta: "Célpiac",
+    label: () => "Keresési terv készítése", sub: () => "Ez adja a jelöltkutatás alapját" },
+  { when: (x) => !x.c.length, view: "celpiac", cta: "Célpiac",
+    label: () => "Jelöltkutatás indítása", sub: () => "A keresési terv kész — indíthatod a kutatást" },
+  { when: (x) => !x.p.ranking, view: "jeloltek", cta: "Jelöltek",
+    label: (x) => "Prioritási javaslat készítése", sub: (x) => `${x.c.length} jelölt vár prioritásra` },
+  { when: (x) => x.newC, view: "jeloltek", cta: "Jelöltek",
+    label: (x) => `Ellenőrizd a(z) ${x.newC} új jelöltet`, sub: () => "Az új találatok még nincsenek átnézve" },
+  { when: (x) => x.blocked.length, view: "jeloltek", cta: "Jelöltek",
+    label: (x) => `${x.blocked.length} jelöltnél hiányzik a megközelítési terv vagy az üzenetvázlat`, sub: () => "A prioritásos jelöltek megkereséséhez ezek kellenek" },
+  { when: (x) => x.toReview.length, view: "jeloltek", cta: "Jelöltek",
+    label: (x) => `${x.toReview.length} üzenetvázlat vár ellenőrzésre`, sub: () => "Kiküldés előtt hagyd jóvá a vázlatokat" },
+  { when: (x) => x.toSend.length, view: "jeloltek", cta: "Jelöltek",
+    label: (x) => `${x.toSend.length} jóváhagyott üzenetvázlat vár kiküldésre`, sub: () => "Küldd ki a saját csatornádon, és rögzítsd itt" },
+  { when: (x) => x.cooling.length, view: "jeloltek", cta: "Jelöltek",
+    label: (x) => `${x.cooling.length} jelöltnél régóta nincs lépés — utánkövetés`, sub: (x) => `${x.coolDays}+ napja nincs aktivitás` },
+  { when: (x) => x.awaiting.length, view: "jeloltek", cta: "Jelöltek",
+    label: () => "Rögzítsd a beérkező válaszokat", sub: (x) => `${x.awaiting.length} kiküldött megkeresésre várunk választ` },
+  { when: () => true, view: "eredmenyek", cta: "Eredmények",
+    label: () => "Nézd át az eredményeket", sub: () => "Minden folyamatban lévő lépés naprakész" },
+];
 function nextStep(p) {
   if (!p) return null;
   const c = activeCandidates(p);
-  if (!p.brief_raw && !p.intake) return { view: "pozicio", label: "Illeszd be a briefet, majd futtasd az elemzést", sub: "A megbízás a brief tisztázásával indul", cta: "Pozíció és brief" };
-  if (!p.intake) return { view: "pozicio", label: "Brief elemzése", sub: "A brief megvan — kérj javasolt pozíció-összefoglalót", cta: "Pozíció és brief" };
-  if (!c.length) {
-    if (p.intake_review !== "approved") return { view: "pozicio", label: "Véglegesítsd a briefet", sub: "Szerkeszd a javaslatot, és hagyd jóvá — erre épül a keresés", cta: "Pozíció és brief" };
-    if (!p.query) return { view: "celpiac", label: "Keresési terv készítése", sub: "Ez adja a jelöltkutatás alapját", cta: "Célpiac" };
-    return { view: "celpiac", label: "Jelöltkutatás indítása", sub: "A keresési terv kész — indíthatod a kutatást", cta: "Célpiac" };
-  }
-  if (!p.ranking) return { view: "jeloltek", label: "Prioritási javaslat készítése", sub: `${c.length} jelölt vár prioritásra`, cta: "Jelöltek" };
-  const newC = c.filter((x) => x.is_new).length;
-  if (newC) return { view: "jeloltek", label: `Ellenőrizd a(z) ${newC} új jelöltet`, sub: "Az új találatok még nincsenek átnézve", cta: "Jelöltek" };
   const { rows, coolDays } = pipelineRows(p);
-  const blocked = rows.filter((r) => !(r.hasAttr && r.hasDraft));
-  if (blocked.length) return { view: "jeloltek", label: `${blocked.length} jelöltnél hiányzik a megközelítési terv vagy az üzenetvázlat`, sub: "A prioritásos jelöltek megkereséséhez ezek kellenek", cta: "Jelöltek" };
-  const toReview = rows.filter((r) => r.hasDraft && !r.reviewed && !r.sent);
-  if (toReview.length) return { view: "megkeresesek", label: `${toReview.length} üzenetvázlat vár ellenőrzésre`, sub: "Kiküldés előtt hagyd jóvá a vázlatokat", cta: "Megkeresések" };
-  const toSend = rows.filter((r) => r.reviewed && !r.sent);
-  if (toSend.length) return { view: "megkeresesek", label: `${toSend.length} jóváhagyott üzenetvázlat vár kiküldésre`, sub: "Küldd ki a saját csatornádon, és rögzítsd itt", cta: "Megkeresések" };
-  const cooling = rows.filter((r) => r.sent && !r.replied && (r.touched == null || r.touched > coolDays));
-  if (cooling.length) return { view: "jeloltek", label: `${cooling.length} jelöltnél régóta nincs lépés — utánkövetés`, sub: `${coolDays}+ napja nincs aktivitás`, cta: "Jelöltek" };
-  const awaiting = rows.filter((r) => r.sent && !r.replied);
-  if (awaiting.length) return { view: "megkeresesek", label: "Rögzítsd a beérkező válaszokat", sub: `${awaiting.length} kiküldött megkeresésre várunk választ`, cta: "Megkeresések" };
-  return { view: "eredmenyek", label: "Nézd át az eredményeket", sub: "Minden folyamatban lévő lépés naprakész", cta: "Eredmények" };
+  const x = {
+    p, c, coolDays, rows,
+    newC: c.filter((y) => y.is_new).length,
+    blocked: rows.filter((r) => !(r.hasAttr && r.hasDraft)),
+    toReview: rows.filter((r) => r.hasDraft && !r.reviewed && !r.sent),
+    toSend: rows.filter((r) => r.reviewed && !r.sent),
+    cooling: rows.filter((r) => isCooling(r, coolDays)),
+    awaiting: rows.filter((r) => r.sent && !r.replied),
+  };
+  const rule = NEXT_STEP_RULES.find((r) => r.when(x));
+  return rule ? { view: rule.view, label: rule.label(x), sub: rule.sub(x), cta: rule.cta } : null;
 }
 
 // Figyelmet igényel? (nyitóképernyő jelzéshez)
@@ -362,7 +452,7 @@ function needsAttention(p) {
   if (!p.ranking) return false;
   const { rows, coolDays } = pipelineRows(p);
   const blocked = rows.filter((r) => !(r.hasAttr && r.hasDraft)).length;
-  const cooling = rows.filter((r) => r.hasAttr && !r.replied && (r.touched == null || r.touched > coolDays)).length;
+  const cooling = rows.filter((r) => isCooling(r, coolDays)).length;
   return blocked > 0 || cooling > 0;
 }
 
@@ -380,19 +470,162 @@ async function loadStatus() {
 }
 
 // ── NÉZET-VÁLTÁS ────────────────────────────────────────────────────────
+// A böngészőben eltárolt nézetnév túléli a felület átalakítását. Ha egy nézet
+// megszűnik vagy átnevezik, a visszatérő látogató enélkül üres munkateret kap.
+/* Három fázis, mert a munka valóban háromféle: egyszeri előkészítés,
+   ismétlődő jelöltmunka, lezárás. A fázis megmondja, mibe kell ma
+   belenyúlni és mibe nem. */
+const PHASES = [
+  { key: "elokeszites", label: "1 · Előkészítés", views: [
+    ["pozicio", "Brief és pozíció"],
+    ["ugyfel", "Ügyfél-egyeztetés"],
+    ["celpiac", "Célpiac"],
+  ] },
+  { key: "merites", label: "2 · Merítés és megkeresés", views: [
+    ["jeloltek", "Jelöltek"],
+    ["interju", "Interjúterv"],
+  ] },
+  { key: "lezaras", label: "3 · Lezárás", views: [
+    ["eredmenyek", "Eredmények"],
+  ] },
+];
+const VIEWS = ["home", "attekintes"].concat(...PHASES.map((f) => f.views.map(([v]) => v)));
+// A jegyzet már nem nézet, hanem fiók — a régi nézetnév oda irányít.
+const LEGACY_VIEW_REDIRECT = { megkeresesek: "jeloltek", jegyzetek: "attekintes" };
 function showView(v) {
+  if (LEGACY_VIEW_REDIRECT[v]) v = LEGACY_VIEW_REDIRECT[v];
+  if (!VIEWS.includes(v)) v = state.project ? "attekintes" : "home";
   if (v !== "home" && !state.project) v = "home";
   state.view = v;
   $("#view-home").classList.toggle("active", v === "home");
   $("#workspace").classList.toggle("hidden", v === "home");
   $$(".eng-view").forEach((s) => s.classList.toggle("active", s.id === "view-" + v));
-  $$(".step").forEach((s) => s.classList.toggle("active", s.dataset.view === v));
   $("#engNav").classList.toggle("hidden", !state.project);
   if (state.project) {
     $("#engNavLabel").textContent = shorten(state.project.position.title || state.project.name, 26);
+    renderEngNav(state.project);
   }
+  $$("[data-view]").forEach((s) => s.classList.toggle("active", s.dataset.view === v));
+  renderSubNav();
+  renderBotNav();
   render(v);
   saveUi();
+}
+// Van-e már pozitív válasz? Ez oldja fel az interjútervet — és ez NEM
+// ugyanaz, mint hogy „érkezett válasz”: a negatív válasz nem nyit interjút.
+function hasPositiveReply(p) {
+  return Object.values((p && p.outreach_status) || {}).some((s) => s && s.replied && s.sentiment === "pozitív");
+}
+// Mennyi munka áll az egyes fázisokban — a fázisfejléc ezt mutatja.
+function phaseState(p, key) {
+  if (key === "elokeszites") {
+    const done = !!p.intake && p.intake_review === "approved" && !!(p.query || p.talent_map);
+    return { done, note: done ? "✓" : "" };
+  }
+  if (key === "merites") {
+    const b = boardBuckets(p);
+    const open = b.rangsorolatlan.length + b.elokeszites.length + b.jovahagyasra.length;
+    const total = open + b.kikuldve.length + b.valaszolt.length;
+    return { done: total > 0 && open === 0, note: total ? `${open}/${total}` : "" };
+  }
+  const sent = Object.values(p.outreach_status || {}).some((s) => s && s.sent_at);
+  return { done: p.status === "Betöltve" || p.status === "Lezárva", note: sent ? "" : "" };
+}
+const BOT_SLOTS = [
+  { key: "attekintes", label: "Áttekintés", icon: "◎", view: "attekintes" },
+  { key: "elokeszites", label: "Felkészülés", icon: "◔", phase: "elokeszites" },
+  { key: "jeloltek", label: "Jelöltek", icon: "▦", view: "jeloltek" },
+  { key: "lezaras", label: "Eredmény", icon: "◆", phase: "lezaras" },
+  { key: "more", label: "Több", icon: "⋯" },
+];
+function phaseOf(view) {
+  const f = PHASES.find((x) => x.views.some(([v]) => v === view));
+  return f ? f.key : null;
+}
+function renderBotNav() {
+  const nav = $("#botNav");
+  if (!nav) return;
+  // A nyitóképernyőn nincs megbízás-navigáció — ugyanaz a szabály, mint az oldalsávban.
+  nav.classList.toggle("hidden", !state.project || state.view === "home");
+  if (!state.project) return;
+  const cur = state.view === "jeloltek" ? "jeloltek" : (phaseOf(state.view) || state.view);
+  nav.innerHTML = BOT_SLOTS.map((s) => {
+    const on = s.key === "more" ? state.moreOpen
+      : s.key === "jeloltek" ? state.view === "jeloltek"
+      : s.view ? state.view === s.view : (cur === s.phase && state.view !== "jeloltek");
+    return `<button class="botnav-b${on ? " on" : ""}" data-bot="${s.key}" aria-current="${on ? "page" : "false"}">
+      <span class="botnav-i" aria-hidden="true">${s.icon}</span><span class="botnav-l">${esc(s.label)}</span></button>`;
+  }).join("");
+  $$(".botnav-b", nav).forEach((b) => (b.onclick = () => {
+    const slot = BOT_SLOTS.find((s) => s.key === b.dataset.bot);
+    if (slot.key === "more") return toggleMoreSheet();
+    closeMoreSheet();
+    if (slot.view) return showView(slot.view);
+    const f = PHASES.find((x) => x.key === slot.phase);
+    if (f) showView(f.views[0][0]);
+  }));
+}
+// A fázison belüli lépések: keskeny képernyőn ez váltja ki az oldalsávot.
+function renderSubNav() {
+  const box = $("#subNav");
+  if (!box) return;
+  const fk = phaseOf(state.view);
+  const f = PHASES.find((x) => x.key === fk);
+  const show = !!state.project && !!f && f.views.length > 1 && state.view !== "jeloltek";
+  box.classList.toggle("hidden", !show);
+  if (!show) { box.innerHTML = ""; return; }
+  const gate = !hasPositiveReply(state.project);
+  box.innerHTML = `<span class="subnav-lbl">${esc(f.label)}</span>` + f.views.map(([v, lbl]) =>
+    `<button class="subnav-b${v === state.view ? " on" : ""}${v === "interju" && gate ? " locked" : ""}" data-view="${v}" role="tab" aria-selected="${v === state.view}">${esc(lbl)}</button>`).join("");
+}
+function toggleMoreSheet() { state.moreOpen ? closeMoreSheet() : openMoreSheet(); }
+function closeMoreSheet() {
+  if (!state.moreOpen) return;
+  state.moreOpen = false;
+  $("#moreSheet").classList.add("hidden");
+  syncScrim();
+  renderBotNav();
+}
+function openMoreSheet() {
+  if (!state.project) return;
+  closeDrawer(); closeNotesDrawer();
+  state.moreOpen = true;
+  const p = state.project;
+  $("#moreBody").innerHTML = `
+    <button class="sheet-row" id="msNotes"><b>Napló</b><span>Jegyzetek és módszertani segítség</span></button>
+    <button class="sheet-row" data-view="ugyfel"><b>Ügyfél-egyeztetés</b><span>Felkészülés a hiring managerrel</span></button>
+    <button class="sheet-row" data-view="interju"><b>Interjúterv</b><span>Kompetencia-alapú kérdések</span></button>
+    <div class="sheet-sec">
+      <label class="cov-label">Státusz</label>
+      <select id="msStatus">${STATUSES.map((s) => `<option ${p.status === s ? "selected" : ""}>${s}</option>`).join("")}</select>
+    </div>
+    <div class="sheet-row-inline">
+      <button class="btn" id="msExport">Export</button>
+      <button class="btn btn-ghost" id="msBack">← Megbízások</button>
+    </div>
+    <div class="sheet-foot">${$("#badges").innerHTML}<div class="mut" style="margin-top:6px">${esc(($("#modelLine") || {}).textContent || "")}</div></div>`;
+  $("#moreSheet").classList.remove("hidden");
+  syncScrim();
+  renderBotNav();
+  $("#msNotes").onclick = () => { closeMoreSheet(); openNotesDrawer(); };
+  $$("#moreBody [data-view]").forEach((b) => (b.onclick = () => { closeMoreSheet(); showView(b.dataset.view); }));
+  $("#msStatus").onchange = (e) => { p.status = e.target.value; persist(); render(state.view); toast("Státusz frissítve."); };
+  $("#msExport").onclick = () => { closeMoreSheet(); const b = $("#exportBtn"); if (b) b.click(); };
+  $("#msBack").onclick = () => { closeMoreSheet(); closeEngagement(); };
+}
+function renderEngNav(p) {
+  const box = $("#engSteps");
+  if (!box) return;
+  const gate = !hasPositiveReply(p);
+  box.innerHTML = `<a href="#" class="step" data-view="attekintes"><span class="dot"></span>Áttekintés</a>` +
+    PHASES.map((f) => {
+      const st = phaseState(p, f.key);
+      return `<div class="phase${st.done ? " done" : ""}">
+        <div class="phase-head"><span class="phase-tick">${st.done ? "✓" : "·"}</span>${esc(f.label)}${st.note ? `<span class="phase-note">${esc(st.note)}</span>` : ""}</div>
+        ${f.views.map(([v, lbl]) =>
+          `<a href="#" class="step sub${v === "interju" && gate ? " locked" : ""}" data-view="${v}"><span class="dot"></span>${esc(lbl)}${v === "interju" && gate ? `<span class="step-lock" title="Az első pozitív válasz oldja fel">zárva</span>` : ""}</a>`).join("")}
+      </div>`;
+    }).join("");
 }
 function render(v) {
   if (v === "home") return renderHome();
@@ -403,17 +636,16 @@ function render(v) {
   if (v === "pozicio") renderPositionView(p);
   if (v === "celpiac") renderCelpiac(p);
   if (v === "jeloltek") renderCandidatesView(p);
-  if (v === "megkeresesek") renderOutreachView(p);
-  if (v === "ugyfel") renderClientView(p);
+  if (v === "ugyfel") renderAdvisory(p.advisory);
+  if (v === "interju") renderInterviewView(p);
   if (v === "eredmenyek") renderResults(p);
-  if (v === "jegyzetek") renderNotes(p);
 }
 function openEngagement(id, view) {
   const p = lsGet(id);
   if (!p) { toast("A megbízás nem található ebben a böngészőben."); return; }
   state.projectId = id;
   state.project = p;
-  state.orOpen = null;
+  state.panelTab = "profil";
   closeDrawer();
   showView(view || "attekintes");
 }
@@ -421,6 +653,7 @@ function closeEngagement() {
   state.projectId = null;
   state.project = null;
   closeDrawer();
+  closeNotesDrawer();
   showView("home");
 }
 
@@ -455,14 +688,18 @@ function renderHome() {
   listEl.innerHTML = filtered.length ? `<div class="eng-grid">` + filtered.map((p) => {
     const ns = nextStep(p);
     const attn = needsAttention(p);
-    const pg = progressInfo(p);
+    const fi = funnelInfo(p);
+    const phaseIdx = PHASES.findIndex((f) => f.views.some(([vv]) => vv === (ns ? ns.view : "")));
     const meta2 = [p.position.location, p.position.work_mode, p.position.owner ? "Felelős: " + p.position.owner : ""].filter(Boolean).join(" · ");
     return `<div class="eng-card" data-id="${esc(p.id)}">
       <div class="eng-card-top">
         <div><div class="eng-title">${esc(p.position.title || p.name)}</div><div class="eng-client">${esc(p.position.client || "—")}</div></div>
         <span class="status-chip ${STATUS_CLS[p.status] || ""}">${esc(p.status)}</span>
       </div>
-      <div class="pg-mini" title="${pg.done}/${pg.total} mérföldkő kész"><div class="bar"><span style="width:${pg.pct}%"></span></div><span class="d"></span><span class="v">${pg.pct}%</span></div>
+      <div class="pg-mini" title="${fi.felkutatva} felkutatva · ${fi.prioritasos} prioritásos · ${fi.megkeresve} megkeresve · ${fi.valaszolt} válaszolt">
+        <span class="ph-dots">${PHASES.map((f, i) => `<span class="ph-dot${i <= phaseIdx ? " on" : ""}"></span>`).join("")}</span>
+        <span class="v">${fi.felkutatva} · ${fi.prioritasos} · ${fi.megkeresve} · ${fi.valaszolt}</span>
+      </div>
       ${meta2 ? `<div class="eng-meta">${esc(meta2)}</div>` : ""}
       ${ns ? `<div class="eng-next"><b>Következő:</b> ${esc(ns.label)}</div>` : ""}
       <div class="eng-card-foot">
@@ -561,14 +798,10 @@ function renderEngHeader(p) {
     ...(((p.query || {}).synonyms) || []).slice(0, 2),
     pos.salary_band, pos.language,
   ].filter(Boolean).slice(0, 4);
-  // Progress: menta szegmensek futnak be a korall döntési pontba (JEL-motívum).
-  const pg = progressInfo(p);
-  const pgHtml = `<div class="pg" role="progressbar" aria-valuenow="${pg.pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Megbízás előrehaladása">
-    <div class="pg-track">${pg.items.map((m, i) =>
-      `<span class="pg-seg ${m.done ? "done" : ""}${i === pg.done && pg.done < pg.total ? " cur" : ""}" title="${esc(m.label)}${m.done ? " ✓" : ""}"></span>`).join("")}</div>
-    <span class="pg-dot ${pg.pct === 100 ? "full" : ""}"></span>
-    <div class="pg-pct">${pg.pct}%<span class="pg-frac">${pg.done}/${pg.total} lépés</span></div>
-  </div>`;
+  // A JEL-jel motívuma valódi számokra kötve: keskenyedő menta sávok a
+  // korall döntési pontba. Ugyanaz a forma, mint a márkajel — csak igaz.
+  const fi = funnelInfo(p);
+  const pgHtml = `<div class="funnel-wrap">${funnelHtml(fi)}${fi.kizart ? `<span class="funnel-excl">+${fi.kizart} kizárva</span>` : ""}</div>`;
   $("#engHeader").innerHTML = `<div class="eng-header">
     <div class="eng-header-top">
       <div>
@@ -604,66 +837,86 @@ function renderEngHeader(p) {
 }
 
 // ── ÁTTEKINTÉS ──────────────────────────────────────────────────────────
-const MILESTONES = [
-  ["Brief tisztázva", (p) => !!p.intake],
-  ["Célpiac összeállítva", (p) => !!(p.query || p.talent_map)],
-  ["Jelöltek felkutatva", (p) => (p.candidates || []).length > 0],
-  ["Prioritások ellenőrizve", (p) => !!p.ranking],
-  ["Megkeresések előkészítve", (p) => Object.keys(p.outreach || {}).length > 0],
-  ["Megkeresések kiküldve", (p) => Object.values(p.outreach_status || {}).some((s) => s && s.sent_at)],
-  ["Válaszok rögzítve", (p) => Object.values(p.outreach_status || {}).some((s) => s && s.replied)],
-];
-// Előrehaladás a mérföldkövekből — a fejléc-progress bar és a kártyák mini-sávja is ebből él.
-function progressInfo(p) {
-  const items = MILESTONES.map(([label, fn]) => ({ label, done: !!fn(p) }));
-  const done = items.filter((i) => i.done).length;
-  return { items, done, total: items.length, pct: Math.round((done / items.length) * 100) };
+/* ── TÖLCSÉR ─────────────────────────────────────────────────────────────
+   A haladás nem százalék, hanem emberek száma. A korábbi mérföldkő-sáv azt
+   mérte, megtörtént-e valaha egyszer valami, ezért 100%-ot mutatott olyankor
+   is, amikor állt a munka.
+
+   Hatókör: a kizártak nem számítanak bele — ugyanaz az elv, amit a keresési
+   lefedettség is használ („a valódi merítésre mérünk”). A „megkeresve” és a
+   „válaszolt” viszont NEM szűkül A/B prioritásra: különben egy megkeresett,
+   majd hátrasorolt jelölt visszamenőleg csökkentené a tölcsért.          */
+function funnelInfo(p) {
+  const act = activeCandidates(p);
+  const rows = act.map((c) => candRow(p, c));
+  return {
+    felkutatva: act.length,
+    prioritasos: rows.filter((r) => r.tier === "A" || r.tier === "B").length,
+    megkeresve: rows.filter((r) => r.sent).length,
+    valaszolt: rows.filter((r) => r.replied).length,
+    pozitiv: rows.filter((r) => r.replied && r.sentiment === "pozitív").length,
+    kizart: excludedCandidates(p).length,
+  };
+}
+const FUNNEL_STEPS = [["felkutatva", "felkutatva"], ["prioritasos", "prioritásos"], ["megkeresve", "megkeresve"], ["valaszolt", "válaszolt"]];
+function funnelHtml(fi) {
+  const max = Math.max(1, fi.felkutatva);
+  return `<div class="funnel" role="img" aria-label="${FUNNEL_STEPS.map(([k, l]) => `${fi[k]} ${l}`).join(", ")}">
+    ${FUNNEL_STEPS.map(([k, l]) => `<div class="fseg">
+      <div class="fnum">${fi[k]}</div>
+      <div class="ftrack"><span class="fbar" style="width:${Math.round(Math.min(1, fi[k] / max) * 100)}%"></span></div>
+      <div class="flab">${esc(l)}</div>
+    </div>`).join("")}
+    <span class="fdot${fi.pozitiv ? " full" : ""}" title="${fi.pozitiv} pozitív válasz"></span>
+  </div>`;
 }
 function renderOverview(p) {
   const v = $("#view-attekintes");
   const ns = nextStep(p);
-  const ms = MILESTONES.map(([lbl, fn]) => `<span class="ms ${fn(p) ? "done" : ""}">${fn(p) ? "✓" : "○"} ${lbl}</span>`).join("");
   const posSum = p.intake ? shorten(finalBriefText(p), 220) : (p.brief_raw ? shorten(p.brief_raw, 220) : "Még nincs brief.");
+  // Az elakadt jelöltek ide, a teendő alá kerülnek: ami egy kattintással
+  // elintézhető, azt ne kelljen máshol megkeresni.
+  const { rows, coolDays } = pipelineRows(p);
+  const todo = [];
+  rows.forEach((r) => {
+    if (!r.hasAttr) todo.push({ r, txt: "hiányzik a megközelítési terv", cta: "Terv", tab: "megkozelites" });
+    else if (!r.hasDraft) todo.push({ r, txt: "hiányzik az üzenetvázlat", cta: "Vázlat", tab: "uzenet" });
+    else if (!r.reviewed && !r.sent) todo.push({ r, txt: "a vázlat ellenőrzésre vár", cta: "Ellenőrzés", tab: "uzenet" });
+    else if (r.reviewed && !r.sent) todo.push({ r, txt: "jóváhagyva, még nem ment ki", cta: "Kiküldés", tab: "uzenet" });
+  });
+  rows.forEach((r) => { if (isCooling(r, coolDays)) todo.push({ r, txt: `${r.touched == null ? "még nem volt" : r.touched + " napja nincs"} lépés`, cta: "Utánkövetés", tab: "naplo" }); });
+
   v.innerHTML = `
-    <div class="next-card">
-      <div>
-        <div class="next-lbl">Következő teendő</div>
-        <div class="next-txt">${esc(ns.label)}</div>
-        <div class="next-sub">${esc(ns.sub || "")}</div>
+    <div class="card ov-lead">
+      <div class="next-inline">
+        <div>
+          <div class="next-lbl">Következő teendő</div>
+          <div class="next-txt">${esc(ns.label)}</div>
+          <div class="next-sub">${esc(ns.sub || "")}</div>
+        </div>
+        <button class="btn btn-primary" id="nsGo">${esc(ns.cta || "Megnyitás")}</button>
       </div>
-      <button class="btn btn-primary" id="nsGo">${esc(ns.cta || "Megnyitás")}</button>
+      ${todo.length ? `<div class="todo-list">${todo.slice(0, 5).map((t) => `
+        <div class="todo-row">
+          <span class="tier-badge tb tier-${t.r.tier}">${t.r.tier}</span>
+          <span class="todo-name">${esc(t.r.cand.name || t.r.id)}</span>
+          <span class="todo-need">${esc(t.txt)}</span>
+          <button class="btn todo-cta" data-id="${esc(t.r.id)}" data-tab="${esc(t.tab)}">${esc(t.cta)}</button>
+        </div>`).join("")}
+        ${todo.length > 5 ? `<div class="kpi-desc">…és további ${todo.length - 5} jelölt.</div>` : ""}</div>`
+        : `<div class="ov-empty sm">Minden prioritásos jelöltnél megvan a következő lépés.</div>`}
     </div>
-    <div class="card"><h4>Folyamat</h4><div class="milestones">${ms}</div>
-      <div class="kpi-desc" style="margin-top:8px">Nem minden mérföldkő kötelező — bármelyik nézet bármikor megnyitható.</div></div>
     <div class="ov-grid">
       <div class="ov-col">
         <div class="card"><h4>${p.intake && p.intake_review === "approved" ? "Véglegesített brief" : "Pozíció röviden"} ${p.intake ? aiTag(p.intake_review === "approved") : ""}</h4><p>${esc(posSum)}</p>
-          <div class="row" style="margin-top:6px"><button class="btn" id="ovToPoz">Pozíció és brief</button></div></div>
-        <div id="ovAttention"></div>
+          <div class="row" style="margin-top:6px"><button class="btn" id="ovToPoz">Brief és pozíció</button></div></div>
       </div>
-      <div class="ov-col">
-        <div id="ovCoverage"></div>
-        <div class="card"><h4>Módszertani segítség</h4>
-          <p class="kpi-desc">Írd le, hol tartasz vagy hol akadtál el — javaslatot kapsz a következő lépésre.</p>
-          <div class="row"><input id="coachCtx" class="brief-line" placeholder="Mit csináltál / hol akadtál el? (opcionális)" />
-          <button id="coachBtn" class="btn">Javaslat kérése</button></div>
-          <div id="coachOut" class="out"></div></div>
-      </div>
+      <div class="ov-col"><div id="ovCoverage"></div></div>
     </div>`;
   $("#nsGo").onclick = () => showView(ns.view);
   $("#ovToPoz").onclick = () => showView("pozicio");
-  renderAttentionBlock(p);
+  $$("#view-attekintes .todo-cta").forEach((b) => (b.onclick = () => openPanel(b.dataset.id, b.dataset.tab)));
   renderCoverage(p);
-  const notes = p.coach_notes || [];
-  const last = notes[notes.length - 1];
-  if (last) renderCoach(last);
-  $("#coachBtn").onclick = (e) => withLoading(e.target, async () => {
-    const out = await api("POST", `/api/project/${p.id}/coach`, { context: $("#coachCtx").value });
-    p.coach_notes = p.coach_notes || [];
-    p.coach_notes.push({ ts: new Date().toISOString(), ...out });
-    persist();
-    renderCoach(out);
-  });
 }
 function renderCoach(o) {
   const out = $("#coachOut"); if (!out) return;
@@ -673,29 +926,6 @@ function renderCoach(o) {
     ${o.one_lever_now ? `<p><b>Most bevethető:</b> ${esc(o.one_lever_now)}</p>` : ""}
     ${o.skill_focus ? `<p><b>Készség-fókusz:</b> ${esc(o.skill_focus)}</p>` : ""}
     ${o.encouragement ? `<p class="mut">${esc(o.encouragement)}</p>` : ""}</div>`;
-}
-function renderAttentionBlock(p) {
-  const box = $("#ovAttention"); if (!box) return;
-  if (!p.ranking) { box.innerHTML = ""; return; }
-  const { rows, coolDays } = pipelineRows(p);
-  const blockers = rows.map((r) => {
-    const need = !r.hasAttr ? { txt: "hiányzik a megközelítési terv", cta: "Terv" }
-      : !r.hasDraft ? { txt: "hiányzik az üzenetvázlat", cta: "Vázlat" }
-      : (String(r.cand.art14_status || "").includes("pending") ? { txt: "GDPR Art. 14 rendezetlen", cta: "Megnyit" } : null);
-    return need ? { ...r, need } : null;
-  }).filter(Boolean);
-  const cooling = rows.filter((r) => r.hasAttr && !r.replied && (r.touched == null || r.touched > coolDays))
-    .sort((a, b) => (b.touched == null ? 9999 : b.touched) - (a.touched == null ? 9999 : a.touched));
-  const bHtml = blockers.length ? blockers.slice(0, 8).map((r) => `<div class="stuck-item"><span class="tier-badge tb tier-${r.tier}">${r.tier}</span><span class="stuck-name">${esc(r.cand.name || r.id)}</span><span class="stuck-need">${esc(r.need.txt)}</span><button class="btn stuck-cta" data-id="${r.id}">${r.need.cta}</button></div>`).join("") : `<div class="ov-empty sm">Minden prioritásos jelöltnél megvan a következő lépés.</div>`;
-  const cHtml = cooling.length ? cooling.slice(0, 8).map((r) => `<div class="stuck-item"><span class="stuck-days">${r.touched == null ? "—" : r.touched + "n"}</span><span class="stuck-name">${esc(r.cand.name || r.id)}</span><span class="stuck-need">${r.touched == null ? "még nem volt lépés" : "nincs lépés"}</span><button class="btn stuck-cta touch" data-id="${r.id}">Aktivitás rögzítése</button></div>`).join("") : `<div class="ov-empty sm">Minden prioritásos jelöltnél friss az aktivitás.</div>`;
-  box.innerHTML = `<div class="stuck-grid">
-    <div><div class="ck-sec-head sm"><h3>Hiányzó lépések</h3><span class="ck-sec-note">${blockers.length} jelölt</span></div>${bHtml}</div>
-    <div><div class="ck-sec-head sm"><h3>Figyelmet igénylő jelöltek</h3><span class="ck-sec-note">régóta nincs rajtuk lépés</span></div>${cHtml}</div>
-  </div>
-  ${excludedCandidates(p).length ? `<div class="excl-banner sm"><span><b>${excludedCandidates(p).length} jelölt kizárva a merítésből</b> — az ügyfél jelenlegi vagy volt munkatársai, illetve off-limits cég.</span><button class="btn" id="ovExShow">Megnézem</button></div>` : ""}`;
-  $$("#ovAttention .stuck-cta").forEach((btn) => (btn.onclick = () => btn.classList.contains("touch") ? touchCand(btn.dataset.id) : openDrawer(btn.dataset.id)));
-  const ovEx = $("#ovExShow");
-  if (ovEx) ovEx.onclick = () => { state.openExcluded = true; showView("jeloltek"); };
 }
 function renderCoverage(p) {
   const box = $("#ovCoverage"); if (!box) return;
@@ -864,12 +1094,27 @@ function renderCelpiac(p) {
   renderTalent(p);
   renderStrategyChat(p);
   $("#discoverNote").innerHTML = p.discover_note ? `<div class="note">${esc(p.discover_note)}</div>` : "";
+  // Vezetett lépcső: a térkép a terv után, a kutatás a térkép után élesedik.
+  // A függés eddig is létezett, csak nem látszott — négy egyenrangú gomb volt.
+  const hasBrief = !!p.intake, hasPlan = !!p.query, hasMap = !!p.talent_map;
   const qb = $("#queryBtn");
-  if (qb) qb.textContent = p.query ? "Keresési terv frissítése" : "Keresési terv készítése";
+  if (qb) { qb.textContent = hasPlan ? "Keresési terv frissítése" : "Keresési terv készítése"; qb.disabled = !hasBrief; }
   const tb = $("#talentBtn");
-  if (tb) tb.textContent = p.talent_map ? "Célpiac-térkép frissítése" : "Célpiac-térkép";
-  if (!p.intake && !p.query) {
-    $("#queryOut").innerHTML = `<div class="dep-note"><span>A keresési tervhez előbb elemezd a briefet.</span><button class="btn" id="depToPoz">Pozíció és brief</button></div>`;
+  if (tb) { tb.textContent = hasMap ? "Célpiac-térkép frissítése" : "Célpiac-térkép készítése"; tb.disabled = !hasPlan; }
+  const db = $("#discoverBtn");
+  if (db) db.disabled = !hasPlan;
+  $("#stepPlan").className = "stepc" + (hasPlan ? " done" : hasBrief ? " cur" : " lock");
+  $("#stepMap").className = "stepc" + (hasMap ? " done" : hasPlan ? " cur" : " lock");
+  $("#stepDisc").className = "stepc" + ((p.candidates || []).length ? " done" : hasPlan ? " cur" : " lock");
+  $("#stepMapNote").textContent = hasPlan
+    ? (hasMap ? `${((p.talent_map || {}).target_companies || []).length} célcég · ${((p.talent_map || {}).competitor_clusters || []).length} klaszter`
+              : "Célcégek, versenytárs-klaszterek, közösségek.")
+    : "Előbb keresési terv kell.";
+  $("#stepDiscNote").textContent = hasPlan
+    ? ((p.candidates || []).length ? `${(p.candidates || []).length} találat · ${activeCandidates(p).length} a merítésben` : "A terv alapján keresi meg az embereket.")
+    : "Előbb keresési terv kell.";
+  if (!hasBrief && !hasPlan) {
+    $("#queryOut").innerHTML = `<div class="dep-note"><span>A keresési tervhez előbb elemezd a briefet.</span><button class="btn" id="depToPoz">Brief és pozíció</button></div>`;
     const b = $("#depToPoz"); if (b) b.onclick = () => showView("pozicio");
   }
 }
@@ -1192,17 +1437,75 @@ function candStateChips(p, c) {
   else if (s.hasAttr) bits.push(`<span class="chip warn">nincs vázlat</span>`);
   return bits.join("");
 }
-function candNext(p, c) {
-  const s = orState(p, c.id);
-  const t = effTier(p, c.id);
-  if (!t) return "prioritás beállítása";
-  if (t === "C" || t === "D") return t === "C" ? "figyelőlista" : "most nem javasolt";
-  if (!s.hasAttr) return "megközelítési terv készítése";
-  if (!s.hasDraft) return "üzenetvázlat készítése";
-  if (!s.reviewed && !s.sent) return "vázlat ellenőrzése";
-  if (!s.sent) return "kiküldés rögzítése";
-  if (!s.replied) return "válaszra vár";
-  return "folyamatban";
+// A jelölt következő lépése — az állapot-létra egyetlen címkéje.
+function candNext(p, c) { return STAGE_LABEL[candStage(p, c)]; }
+/* ── JELÖLTEK: tábla és lista ────────────────────────────────────────────
+   Egy lista, öt oszlop. Az oszlopok maguk a lépések — a megkeresés állapotai
+   nem külön képernyőn élnek, hanem itt, ahol a jelölt is.                  */
+const BOARD_COLS = [
+  ["rangsorolatlan", "Rangsorolatlan", "Állíts prioritást, vagy zárd ki"],
+  ["elokeszites", "Előkészítés", "Megközelítési terv és üzenetvázlat"],
+  ["jovahagyasra", "Jóváhagyás és küldés", "Ellenőrzés, majd a kiküldés rögzítése"],
+  ["kikuldve", "Kiküldve", "Válaszra vár"],
+  ["valaszolt", "Válaszolt", "Innen megy tovább interjúra"],
+];
+// Keskeny képernyőn a vízszintes tábla nem használható: a felhasználó
+// beállítása megmarad, de a tényleges elrendezés lista lesz.
+const NARROW = "(max-width: 900px)";
+function isNarrow() { return typeof matchMedia === "function" && matchMedia(NARROW).matches; }
+function effectiveCandView() { return isNarrow() ? "list" : (state.candView === "list" ? "list" : "board"); }
+const strongCount = (x) => (x.signals || []).filter((s) => s.strength === "erős").length;
+
+// A szűrők mindkét elrendezésre ugyanúgy hatnak. Az „állapot” szűrő csak
+// listanézetben jelenik meg — a táblán az oszlop maga a szűrő.
+function candMatches(p, x, f, withState) {
+  if (f.q && !`${x.name} ${x.headline} ${x.current_company} ${x.location}`.toLowerCase().includes(f.q)) return false;
+  const t = effTier(p, x.id);
+  if (f.prio === "none" && t) return false;
+  if (f.prio && f.prio !== "none" && t !== f.prio) return false;
+  if (withState && f.state) {
+    const s = orState(p, x.id);
+    if (f.state === "new" && !x.is_new) return false;
+    if (f.state === "noplan" && s.hasAttr) return false;
+    if (f.state === "nodraft" && (s.hasDraft || !s.hasAttr)) return false;
+    if (f.state === "sent" && !s.sent) return false;
+    if (f.state === "replied" && !s.replied) return false;
+  }
+  return true;
+}
+function candCardHtml(p, x) {
+  const t = effTier(p, x.id);
+  const ov = p.priority_overrides[x.id];
+  return `<div class="bcard tier-${t || "none"}" data-id="${esc(x.id)}" tabindex="0" role="button" aria-label="${esc(x.name)} megnyitása">
+    <div class="bcard-top">
+      <select class="prio-sel bcard-prio" data-id="${esc(x.id)}" title="Prioritás — a recruiter felülbírálhatja" aria-label="Prioritás">
+        <option value="" ${!t ? "selected" : ""}>—</option>
+        ${["A", "B", "C", "D"].map((k) => `<option value="${k}" ${t === k ? "selected" : ""}>${k}</option>`).join("")}
+      </select>
+      ${x.is_new ? `<span class="new-chip">Új</span>` : ""}
+      ${ov ? `<span class="bcard-ov" title="A recruiter állította be">kézzel</span>` : ""}
+    </div>
+    <div class="bcard-name">${esc(x.name)}</div>
+    <div class="bcard-meta">${esc(x.headline || "")}</div>
+    <div class="bcard-meta dim">${esc([x.current_company, x.location].filter(Boolean).join(" · "))}</div>
+    <div class="bcard-chips">${candStateChips(p, x)}<span class="chip">${strongCount(x)} erős jel</span></div>
+    <div class="bcard-next">${esc(candNext(p, x))}</div>
+  </div>`;
+}
+function candRowHtml(p, x) {
+  const t = effTier(p, x.id);
+  const ov = p.priority_overrides[x.id];
+  return `<div class="crow tier-${t || "none"}" data-id="${esc(x.id)}">
+    <select class="prio-sel" data-id="${esc(x.id)}" title="Prioritás — a recruiter felülbírálhatja">
+      <option value="" ${!t ? "selected" : ""}>—</option>
+      ${["A", "B", "C", "D"].map((k) => `<option value="${k}" ${t === k ? "selected" : ""}>${k}</option>`).join("")}
+    </select>
+    <div><div class="crow-name">${esc(x.name)}</div><div class="crow-head">${esc(x.headline || "")}</div></div>
+    <div class="crow-meta">${esc(x.current_company || "")}${x.location ? "<br>" + esc(x.location) : ""}</div>
+    <div class="crow-meta">${srcLabel(x.source_type)}<br><span class="mut">${strongCount(x)} erős jel</span>${ov ? `<br><span class="mut" style="font-size:10px">kézzel állítva</span>` : ""}</div>
+    <div class="crow-state">${candStateChips(p, x)}<div class="mut" style="margin-top:3px">Következő: ${candNext(p, x)}</div></div>
+    <button class="btn crow-open" data-id="${esc(x.id)}">Részletek</button>
+  </div>`;
 }
 function renderCandidatesView(p) {
   const v = $("#view-jeloltek");
@@ -1214,55 +1517,66 @@ function renderCandidatesView(p) {
     return;
   }
   const f = state.candFilter;
+  const isBoard = effectiveCandView() === "board";
   const act = activeCandidates(p), exc = excludedCandidates(p);
-  const strongCount = (x) => (x.signals || []).filter((s) => s.strength === "erős").length;
-  const filtered = act.filter((x) => {
-    if (f.q && !`${x.name} ${x.headline} ${x.current_company} ${x.location}`.toLowerCase().includes(f.q)) return false;
-    const t = effTier(p, x.id);
-    if (f.prio === "none" && t) return false;
-    if (f.prio && f.prio !== "none" && t !== f.prio) return false;
-    if (f.state) {
-      const s = orState(p, x.id);
-      if (f.state === "new" && !x.is_new) return false;
-      if (f.state === "noplan" && s.hasAttr) return false;
-      if (f.state === "nodraft" && (s.hasDraft || !s.hasAttr)) return false;
-      if (f.state === "sent" && !s.sent) return false;
-      if (f.state === "replied" && !s.replied) return false;
-    }
-    return true;
+  const shown = act.filter((x) => candMatches(p, x, f, !isBoard));
+
+  // A vödrök a szűrt halmazból épülnek — amit nem látsz, azt nem is számoljuk.
+  const cols = {}; BOARD_COLS.forEach(([k]) => (cols[k] = []));
+  const watch = [];
+  shown.forEach((x) => {
+    const b = STAGE_BUCKET[candStage(p, x)];
+    if (b === "figyelolista") watch.push(x);
+    else if (cols[b]) cols[b].push(x);
   });
   const order = (x) => { const t = effTier(p, x.id); return { A: 0, B: 1, C: 2, D: 3 }[t] ?? 4; };
-  filtered.sort((a, b) => order(a) - order(b) || strongCount(b) - strongCount(a));
+  const bySignal = (a, b) => order(a) - order(b) || strongCount(b) - strongCount(a);
+  Object.values(cols).forEach((arr) => arr.sort(bySignal));
+  watch.sort(bySignal);
+
   const rankNote = p.ranking ? "" : `<div class="dep-note"><span>${act.length} jelölt még prioritás nélkül. A javaslatot te bírálhatod felül.</span><button class="btn btn-primary" id="rankBtn2">Prioritási javaslat készítése</button></div>`;
+
+  const board = `<div class="board" id="candBoard">${BOARD_COLS.map(([k, name, hint]) => `
+    <section class="bcol" data-col="${k}" aria-label="${esc(name)}: ${cols[k].length} jelölt">
+      <div class="bcol-head"><span class="bcol-name">${esc(name)}</span><span class="bcol-num">${cols[k].length}</span></div>
+      <div class="bcol-rule"></div>
+      <div class="bcol-body">${cols[k].map((x) => candCardHtml(p, x)).join("")
+        || `<div class="bcol-empty">${esc(hint)}</div>`}</div>
+    </section>`).join("")}</div>`;
+
+  const listSections = BOARD_COLS.map(([k, name]) => cols[k].length ? `
+    <details class="lgroup" open>
+      <summary><span class="lgroup-name">${esc(name)}</span><span class="lgroup-num">${cols[k].length}</span></summary>
+      <div class="lgroup-body">${cols[k].map((x) => candRowHtml(p, x)).join("")}</div>
+    </details>` : "").join("");
+  const list = `<div id="candRows" class="clist">${listSections || `<div class="ov-empty sm">Nincs a szűrőknek megfelelő jelölt.</div>`}</div>`;
+
   v.innerHTML = `<div class="stage">
     <div class="stage-head"><h2>Jelöltek</h2>
       <p class="stage-sub">${act.length} jelölt a merítésben${exc.length ? ` · ${exc.length} kizárva` : ""} · a prioritás a lista tulajdonsága — az AI-javaslatot bármikor felülírhatod.</p></div>
     ${exc.length ? `<div class="excl-banner"><span><b>${exc.length} jelölt nem került a listára.</b> Az ügyfél jelenlegi vagy volt munkatársai, illetve off-limits cégnél dolgozók — őket a hiring manager ismeri.</span><button class="btn" id="candExShow">Megnézem</button></div>` : ""}
     <div class="cand-toolbar">
+      ${isNarrow() ? "" : `<div class="viewtog" role="group" aria-label="Elrendezés">
+        <button class="filter-pill${isBoard ? " active" : ""}" data-cv="board" aria-pressed="${isBoard}">Tábla</button>
+        <button class="filter-pill${isBoard ? "" : " active"}" data-cv="list" aria-pressed="${!isBoard}">Lista</button>
+      </div>`}
       ${p.ranking ? `<button class="btn" id="rankBtn">Prioritási javaslat frissítése</button>` : ""}
-      <select id="fPrio"><option value="">prioritás: mind</option><option value="A" ${f.prio === "A" ? "selected" : ""}>A</option><option value="B" ${f.prio === "B" ? "selected" : ""}>B</option><option value="C" ${f.prio === "C" ? "selected" : ""}>C</option><option value="D" ${f.prio === "D" ? "selected" : ""}>D</option><option value="none" ${f.prio === "none" ? "selected" : ""}>nincs prioritás</option></select>
-      <select id="fState"><option value="">állapot: mind</option><option value="new" ${f.state === "new" ? "selected" : ""}>új</option><option value="noplan" ${f.state === "noplan" ? "selected" : ""}>nincs terv</option><option value="nodraft" ${f.state === "nodraft" ? "selected" : ""}>nincs vázlat</option><option value="sent" ${f.state === "sent" ? "selected" : ""}>kiküldve</option><option value="replied" ${f.state === "replied" ? "selected" : ""}>válaszolt</option></select>
-      <span class="mut" style="font-size:12px">${filtered.length}/${act.length} látható</span>
+      <select id="fPrio" aria-label="Prioritás szűrő"><option value="">prioritás: mind</option>${["A", "B", "C", "D"].map((k) => `<option value="${k}" ${f.prio === k ? "selected" : ""}>${k}</option>`).join("")}<option value="none" ${f.prio === "none" ? "selected" : ""}>nincs prioritás</option></select>
+      ${isBoard ? "" : `<select id="fState" aria-label="Állapot szűrő"><option value="">állapot: mind</option><option value="new" ${f.state === "new" ? "selected" : ""}>új</option><option value="noplan" ${f.state === "noplan" ? "selected" : ""}>nincs terv</option><option value="nodraft" ${f.state === "nodraft" ? "selected" : ""}>nincs vázlat</option><option value="sent" ${f.state === "sent" ? "selected" : ""}>kiküldve</option><option value="replied" ${f.state === "replied" ? "selected" : ""}>válaszolt</option></select>`}
+      <span class="mut" style="font-size:12px">${shown.length}/${act.length} látható</span>
     </div>
     ${rankNote}
     ${p.ranking && p.ranking.note ? `<div class="kpi-desc" style="margin:6px 0 2px">${esc(p.ranking.note)} ${demoTag(p.ranking)}</div>` : ""}
-    <div id="candRows" style="margin-top:10px">${filtered.map((x) => {
-      const t = effTier(p, x.id);
-      const ov = p.priority_overrides[x.id];
-      return `<div class="crow tier-${t || "none"}" data-id="${esc(x.id)}">
-        <select class="prio-sel" data-id="${esc(x.id)}" title="Prioritás — a recruiter felülbírálhatja">
-          <option value="" ${!t ? "selected" : ""}>—</option>
-          ${["A", "B", "C", "D"].map((k) => `<option value="${k}" ${t === k ? "selected" : ""}>${k}</option>`).join("")}
-        </select>
-        <div><div class="crow-name">${esc(x.name)}</div><div class="crow-head">${esc(x.headline || "")}</div></div>
-        <div class="crow-meta">${esc(x.current_company || "")}${x.location ? "<br>" + esc(x.location) : ""}</div>
-        <div class="crow-meta">${srcLabel(x.source_type)}<br><span class="mut">${strongCount(x)} erős jel</span>${ov ? `<br><span class="mut" style="font-size:10px">kézzel állítva</span>` : ""}</div>
-        <div class="crow-state">${candStateChips(p, x)}<div class="mut" style="margin-top:3px">Következő: ${candNext(p, x)}</div></div>
-        <button class="btn crow-open" data-id="${esc(x.id)}">Részletek</button>
-      </div>`;
-    }).join("") || `<div class="ov-empty sm">Nincs a szűrőknek megfelelő jelölt.</div>`}</div>
-    ${exc.length ? `<details class="excl-details" id="exclDetails" ${state.openExcluded ? "open" : ""}>
-      <summary>Kizárva a merítésből (${exc.length}) — indoklással, bármikor visszahozható</summary>
+    ${isBoard ? board : list}
+
+    ${watch.length ? `<details class="lane" id="watchLane">
+      <summary><b>Figyelőlista</b> — C és D prioritás, nem a mostani körben <span class="lane-num">${watch.length}</span></summary>
+      <div class="lane-body" id="watchRows">${watch.map((x) => candRowHtml(p, x)).join("")}</div>
+      <div class="note">A megkeresés-állapotuk itt is látszik: ha valakit már megkerestél, majd hátrasoroltál, nem tűnik el nyomtalanul.</div>
+    </details>` : ""}
+
+    ${exc.length ? `<details class="excl-details lane" id="exclDetails" ${state.openExcluded ? "open" : ""}>
+      <summary>Kizárva a merítésből — indoklással, bármikor visszahozható <span class="lane-num">${exc.length}</span></summary>
       <div id="exclRows">${exc.map((x) => {
         const e = exclusionFor(p, x) || {};
         return `<div class="crow crow-excl" data-id="${esc(x.id)}">
@@ -1276,11 +1590,17 @@ function renderCandidatesView(p) {
       <div class="note">A kizárás nem törlés: a találat megmarad, csak nem kerül a munkalistára és a megkeresésekbe. A szabályokat a <b>Célpiac</b> nézetben állíthatod.</div>
     </details>` : ""}
   </div>`;
+
   if (state.openExcluded) {
     state.openExcluded = false;
     const d0 = $("#exclDetails");
     if (d0) setTimeout(() => d0.scrollIntoView({ behavior: "smooth", block: "center" }), 30);
   }
+  $$(".viewtog .filter-pill").forEach((b) => (b.onclick = () => {
+    state.candView = b.dataset.cv;
+    saveUi();
+    renderCandidatesView(p);
+  }));
   const exBtn = $("#candExShow");
   if (exBtn) exBtn.onclick = () => {
     const d = $("#exclDetails");
@@ -1293,7 +1613,7 @@ function renderCandidatesView(p) {
     renderCandidatesView(p);
     toast("Jelölt visszahozva a merítésbe.");
   }));
-  $$("#exclRows .crow-excl").forEach((r) => (r.onclick = () => openDrawer(r.dataset.id)));
+  $$("#exclRows .crow-excl").forEach((r) => (r.onclick = () => openPanel(r.dataset.id)));
   const rb = $("#rankBtn") || $("#rankBtn2");
   if (rb) rb.onclick = (e) => withLoading(e.target, async () => {
     const r = await api("POST", `/api/project/${p.id}/rank`);
@@ -1302,9 +1622,10 @@ function renderCandidatesView(p) {
     renderCandidatesView(p);
     toast("Prioritási javaslat kész — ellenőrizd és igazítsd, ha kell.");
   });
-  $$("#candRows .prio-sel").forEach((sel) => {
+  $$("#view-jeloltek .prio-sel").forEach((sel) => {
     sel.onclick = (e) => e.stopPropagation();
-    sel.onchange = (e) => {
+    sel.onkeydown = (e) => e.stopPropagation();
+    sel.onchange = () => {
       const id = sel.dataset.id;
       if (sel.value) p.priority_overrides[id] = sel.value;
       else delete p.priority_overrides[id];
@@ -1312,27 +1633,105 @@ function renderCandidatesView(p) {
       renderCandidatesView(p);
     };
   });
-  $$("#candRows .crow-open").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); openDrawer(b.dataset.id); }));
-  $$("#candRows .crow").forEach((r) => (r.onclick = () => openDrawer(r.dataset.id)));
-  $$("#fPrio, #fState").forEach((sel) => (sel.onchange = () => {
-    state.candFilter.prio = $("#fPrio").value;
-    state.candFilter.state = $("#fState").value;
+  $$("#view-jeloltek .crow-open").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); openPanel(b.dataset.id); }));
+  $$("#candRows .crow, #watchRows .crow").forEach((r) => (r.onclick = () => openPanel(r.dataset.id)));
+  $$("#candBoard .bcard").forEach((r) => {
+    r.onclick = () => openPanel(r.dataset.id);
+    r.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPanel(r.dataset.id); } };
+  });
+  const fp = $("#fPrio"), fs = $("#fState");
+  const applyFilters = () => {
+    state.candFilter.prio = fp ? fp.value : "";
+    if (fs) state.candFilter.state = fs.value;
     renderCandidatesView(p);
-  }));
+  };
+  if (fp) fp.onchange = applyFilters;
+  if (fs) fs.onchange = applyFilters;
 }
 
 // ── JELÖLT RÉSZLETES NÉZET (oldalsó panel) ──────────────────────────────
-function openDrawer(id) {
+/* Két oldalsó fiók van: a jelöltpanel és a napló. Egyszerre csak az egyik
+   lehet nyitva — a sötétítés és a görgetés-zár közös. */
+function anyDrawerOpen() { return !!state.drawerId || state.notesOpen || state.moreOpen; }
+function syncScrim() {
+  const on = anyDrawerOpen();
+  $("#scrim").classList.toggle("hidden", !on);
+  document.body.classList.toggle("no-scroll", on);
+}
+function openNotesDrawer() {
+  if (!state.project) return;
+  closeDrawer();
+  state.notesOpen = true;
+  $("#notesDrawer").classList.remove("hidden");
+  syncScrim();
+  renderNotes(state.project);
+  const h = $("#notesTitle"); if (h) h.focus();
+}
+function closeNotesDrawer() {
+  if (!state.notesOpen) return;
+  state.notesOpen = false;
+  $("#notesDrawer").classList.add("hidden");
+  syncScrim();
+}
+const PANEL_TABS = [["profil", "Profil"], ["megkozelites", "Megközelítés"], ["uzenet", "Üzenet"], ["naplo", "Napló"]];
+function openPanel(id, tab) {
   const p = state.project; if (!p) return;
   const c = candById(p, id); if (!c) return;
+  const wasOpen = !!state.drawerId;
   state.drawerId = id;
+  state.panelTab = PANEL_TABS.some(([k]) => k === tab) ? tab : "profil";
   if (c.is_new) { c.is_new = false; persist(); }
+  closeSearchResults();
+  closeNotesDrawer();
   $("#candDrawer").classList.remove("hidden");
+  syncScrim();
+  // A telefonos vissza-gomb a panelt zárja, ne a megbízást hagyja el.
+  if (!wasOpen) { try { history.pushState({ jelPanel: id }, ""); } catch (e) {} }
+  renderDrawer(p, c);
+  const h = $("#candDrawerTitle"); if (h) h.focus();
+}
+function closeDrawer(fromPop) {
+  if (!state.drawerId) return;
+  state.drawerId = null;
+  $("#candDrawer").classList.add("hidden");
+  syncScrim();
+  if (!fromPop && history.state && history.state.jelPanel) { try { history.back(); } catch (e) {} }
+}
+// A régi név megmarad, hogy a hívási helyek egy helyen legyenek átvezethetők.
+function openDrawer(id) { openPanel(id); }
+function setPanelTab(tab) {
+  const p = state.project; if (!p || !state.drawerId) return;
+  const c = candById(p, state.drawerId); if (!c) return;
+  // Fülváltás nem veszíthet el begépelt szöveget.
+  if (state.panelTab === "uzenet") syncMessageDraft(p, state.drawerId);
+  state.panelTab = tab;
   renderDrawer(p, c);
 }
-function closeDrawer() { state.drawerId = null; $("#candDrawer").classList.add("hidden"); }
+// Jelölt-idővonal: nem tárolunk külön eseménynaplót — a meglévő mezőkből áll össze.
+function candTimeline(p, c) {
+  const s = (p.outreach_status || {})[c.id] || {};
+  const ev = [];
+  if (s.reviewed_at) ev.push({ ts: s.reviewed_at, kind: "esemeny", note: "Üzenetvázlat jóváhagyva" });
+  if (s.sent_at) ev.push({ ts: s.sent_at, kind: "esemeny", note: "Megkeresés kiküldve" });
+  if (s.replied_at) ev.push({ ts: s.replied_at, kind: "esemeny", note: "Válasz érkezett — " + sentiLabel(s.sentiment) });
+  (p.memory || []).forEach((m) => { if (m.candidate_id === c.id) ev.push(m); });
+  ev.sort((a, b) => String(b.ts || "").localeCompare(String(a.ts || "")));
+  return ev;
+}
+const NOTE_KIND_LABEL = { esemeny: "esemény", candidate: "jelölt", note: "megbízás" };
+function renderNoteList(entries, opts) {
+  opts = opts || {};
+  if (!entries.length) return `<div class="ov-empty sm">${esc(opts.empty || "Még nincs bejegyzés.")}</div>`;
+  return entries.map((e) => {
+    const kind = NOTE_KIND_LABEL[e.kind] || NOTE_KIND_LABEL.note;
+    const who = opts.candidateName && e.candidate_id ? `<b>${esc(opts.candidateName(e.candidate_id))}</b> — ` : "";
+    return `<div class="note-row"><span class="note-kind${e.kind === "esemeny" ? " ev" : ""}">${esc(kind)}</span>
+      <div class="note-body">${who}${esc(e.note)}<div class="note-ts">${esc(String(e.ts || "").slice(0, 16).replace("T", " "))}</div></div></div>`;
+  }).join("");
+}
 function renderDrawer(p, c) {
   $("#candDrawerTitle").textContent = c.name || c.id;
+  $("#candDrawerSub").textContent = [c.headline, c.current_company].filter(Boolean).join(" · ");
   const a = (p.assessments || {})[c.id];
   const at = (p.attraction || {})[c.id];
   const o = (p.outreach || {})[c.id];
@@ -1341,11 +1740,21 @@ function renderDrawer(p, c) {
   const body = $("#candDrawerBody");
   const exc = exclusionFor(p, c);
   const man = (p.exclusions.candidates || {})[c.id];
-  body.innerHTML = `
-    ${exc ? `<div class="excl-banner d"><div><b>${esc(exc.label)}</b><div class="crow-meta">${esc(exc.detail || "")}</div></div>
+  const tab = state.panelTab || "profil";
+
+  const badge = { uzenet: o ? (s.sent ? "✓" : "•") : "", naplo: candTimeline(p, c).length || "" };
+  $("#candTabs").innerHTML = PANEL_TABS.map(([k, lbl]) =>
+    `<button class="tab${tab === k ? " on" : ""}" role="tab" aria-selected="${tab === k}" data-tab="${k}">${esc(lbl)}${badge[k] ? `<span class="tab-b">${esc(String(badge[k]))}</span>` : ""}</button>`).join("");
+
+  const banner = exc
+    ? `<div class="excl-banner d"><div><b>${esc(exc.label)}</b><div class="crow-meta">${esc(exc.detail || "")}</div></div>
       <button class="btn" id="dExInclude">Mégis bevonom</button></div>`
-      : man && man.state === "include" ? `<div class="excl-banner ok d"><div><b>Kizárás felülbírálva</b><div class="crow-meta">A recruiter szándékosan bevonta a merítésbe.</div></div>
-      <button class="btn btn-ghost" id="dExRevert">Vissza a kizártakhoz</button></div>` : ""}
+    : man && man.state === "include"
+      ? `<div class="excl-banner ok d"><div><b>Kizárás felülbírálva</b><div class="crow-meta">A recruiter szándékosan bevonta a merítésbe.</div></div>
+      <button class="btn btn-ghost" id="dExRevert">Vissza a kizártakhoz</button></div>` : "";
+
+  const panes = {
+    profil: `
     <div class="d-sec"><h5>Profil</h5>
       <div class="crow-name">${esc(c.name)}</div>
       <div class="crow-head">${esc(c.headline || "")}</div>
@@ -1370,19 +1779,47 @@ function renderDrawer(p, c) {
         ${F.qclarify(a).length ? `<h5 style="margin-top:8px">A beszélgetésen tisztázandó</h5>${list(F.qclarify(a))}` : ""}
         ${(a.unknowns || []).length ? `<h5 style="margin-top:8px">Amit nem tudunk</h5>${a.unknowns.map((u) => `<div class="flag">? ${esc(u)}</div>`).join("")}` : ""}`
       : `<button class="btn" id="dAssess">Profil összegzése</button>`}
-    </div>
+    </div>`,
+
+    megkozelites: `
     <div class="d-sec"><h5>Megközelítési terv ${at ? demoTag(at) : ""}</h5>
-      ${at ? renderAttractInner(at) : `<button class="btn btn-primary" id="dAttract">Megközelítési terv készítése</button>`}
+      ${at ? renderAttractInner(at) : `<p class="kpi-desc" style="margin-top:0">Mit érdemes mondani ennek az embernek, és miért — a jeleiből visszavezetve.</p><button class="btn btn-primary" id="dAttract">Megközelítési terv készítése</button>`}
     </div>
-    <div class="d-sec"><h5>Üzenetvázlat</h5>
-      ${o ? `<p class="mut" style="font-size:12px">${esc(shorten(o.subject || o.body || "", 90))}</p><button class="btn" id="dToOutreach">Megnyitás a Megkeresésekben</button>`
-        : at ? `<button class="btn" id="dDraft">Üzenetvázlat készítése</button>` : `<span class="mut" style="font-size:12px">Üzenetvázlathoz előbb készíts megközelítési tervet.</span>`}
-    </div>
+    ${at ? `<div class="d-sec"><h5>Következő lépés</h5>
+      ${o ? `<p class="mut" style="font-size:12.5px">Az üzenetvázlat elkészült.</p><button class="btn" id="dGoMsg">Üzenet megnyitása</button>`
+          : `<button class="btn btn-primary" id="dDraft">Üzenetvázlat készítése</button>`}</div>` : ""}`,
+
+    uzenet: `<div id="orEditor"></div>`,
+
+    naplo: `
     <div class="d-sec"><h5>Aktivitás</h5>
       <div class="crow-meta">Utolsó lépés: ${relTime(c.last_touched)}${s.sent ? " · kiküldve" : ""}${s.replied ? " · " + esc(sentiLabel(s.sentiment)) : ""}</div>
       <div class="row" style="margin-top:8px"><button class="btn" id="dTouch">Aktivitás rögzítése</button>
         ${!exc ? `<button class="btn btn-ghost" id="dExExclude" title="Kivétel a merítésből">Kizárom a merítésből</button>` : ""}</div>
-    </div>`;
+    </div>
+    <div class="d-sec"><h5>Jegyzet hozzáadása</h5>
+      <div class="row"><input id="dNoteIn" class="brief-line" placeholder="Mit érdemes tudni erről a jelöltről?" />
+        <button class="btn btn-primary" id="dNoteSave">Mentés</button></div>
+    </div>
+    <div class="d-sec"><h5>Előzmény</h5>
+      ${renderNoteList(candTimeline(p, c), { empty: "Még nincs esemény és jegyzet ennél a jelöltnél." })}
+    </div>`,
+  };
+  body.innerHTML = banner + (panes[tab] || panes.profil);
+
+  $$("#candTabs .tab").forEach((b) => (b.onclick = () => setPanelTab(b.dataset.tab)));
+  if (tab === "uzenet") renderMessageTab(p, c.id, $("#orEditor"));
+  const dGo = $("#dGoMsg"); if (dGo) dGo.onclick = () => setPanelTab("uzenet");
+  const nSave = $("#dNoteSave");
+  if (nSave) nSave.onclick = () => {
+    const note = $("#dNoteIn").value.trim();
+    if (!note) return;
+    p.memory = p.memory || [];
+    p.memory.push({ ts: new Date().toISOString(), kind: "candidate", candidate_id: c.id, note });
+    persist();
+    renderDrawer(p, c);
+    toast("Jegyzet mentve.");
+  };
   const dInc = $("#dExInclude");
   if (dInc) dInc.onclick = () => { setCandExclusion(p, c.id, "include", "A recruiter szándékosan bevonta."); renderDrawer(p, c); render(state.view); toast("Jelölt bevonva a merítésbe."); };
   const dRev = $("#dExRevert");
@@ -1398,7 +1835,8 @@ function renderDrawer(p, c) {
     render(state.view);
     toast("Jelölt kizárva a merítésből — a kizártak közt megtalálod.");
   };
-  $("#dPrio").onchange = (e) => {
+  const dPr = $("#dPrio");
+  if (dPr) dPr.onchange = (e) => {
     if (e.target.value) p.priority_overrides[c.id] = e.target.value;
     else delete p.priority_overrides[c.id];
     persist();
@@ -1430,13 +1868,12 @@ function renderDrawer(p, c) {
     p.outreach[c.id] = out;
     c.last_touched = new Date().toISOString();
     persist();
-    state.orOpen = c.id;
-    closeDrawer();
-    showView("megkeresesek");
+    // A vázlat ott készül el, ahol dolgozol: a panel nyitva marad, csak fület vált.
+    setPanelTab("uzenet");
+    if (state.view === "jeloltek") render(state.view);
   });
-  const dTo = $("#dToOutreach");
-  if (dTo) dTo.onclick = () => { state.orOpen = c.id; closeDrawer(); showView("megkeresesek"); };
-  $("#dTouch").onclick = () => touchCand(c.id).then(() => renderDrawer(p, c));
+  const dT = $("#dTouch");
+  if (dT) dT.onclick = () => touchCand(c.id).then(() => renderDrawer(p, c));
 }
 function renderAttractInner(o) {
   const gr = o.grounded_read || {};
@@ -1461,48 +1898,7 @@ function renderAttractInner(o) {
     ${gr._stripped_ungrounded ? `<div class="kpi-desc" style="margin-top:6px">🛡️ ${gr._stripped_ungrounded} nem-visszavezethető állítás automatikusan kiszűrve (evidencia-földelés).</div>` : ""}`;
 }
 
-// ── MEGKERESÉSEK ────────────────────────────────────────────────────────
-function renderOutreachView(p) {
-  const v = $("#view-megkeresesek");
-  const ids = new Set([
-    ...Object.keys(p.outreach || {}),
-    ...Object.keys(p.attraction || {}),
-    ...pipelineRows(p).rows.map((r) => r.id),
-  ]);
-  const rows = [...ids].map((id) => ({ id, cand: candById(p, id), ...orState(p, id) })).filter((r) => r.cand && !isExcluded(p, r.cand));
-  rows.sort((a, b) => (b.hasDraft - a.hasDraft) || (a.sent - b.sent));
-  if (!rows.length) {
-    v.innerHTML = `<div class="stage"><div class="stage-head"><h2>Megkeresések</h2></div>
-      <div class="dep-note"><span>Megkereséshez előbb válassz prioritásos jelöltet, és készíts megközelítési tervet.</span><button class="btn btn-primary" id="depToCand">Jelöltek</button></div></div>`;
-    $("#depToCand").onclick = () => showView("jeloltek");
-    return;
-  }
-  v.innerHTML = `<div class="stage">
-    <div class="stage-head"><h2>Megkeresések</h2>
-      <p class="stage-sub">A rendszer nem küld üzenetet — a vázlatot te ellenőrzöd, a saját csatornádon küldöd, és itt rögzíted az állapotát.</p></div>
-    <div id="orRows">${rows.map((r) => {
-      const st = [];
-      if (r.hasDraft) st.push(`<span class="chip">vázlat kész</span>`);
-      if (r.reviewed) st.push(`<span class="chip good">ellenőrizve</span>`);
-      if (r.sent) st.push(`<span class="chip good">kiküldve</span>`);
-      if (r.replied) st.push(sentiChip(r.sentiment));
-      if (!r.hasDraft) st.push(`<span class="chip warn">${r.hasAttr ? "nincs vázlat" : "nincs terv"}</span>`);
-      return `<div class="or-row">
-        <div><div class="crow-name">${esc(r.cand.name)}</div><div class="crow-head">${esc(r.cand.current_company || "")}</div></div>
-        <div class="crow-meta">${esc(((p.outreach || {})[r.id] || {}).channel || shorten(((p.attraction || {})[r.id] || {}).channel || "", 40) || "—")}</div>
-        <div class="or-states">${st.join("")}</div>
-        <button class="btn ${state.orOpen === r.id ? "btn-primary" : ""}" data-id="${esc(r.id)}">${r.hasDraft ? "Megnyitás" : "Vázlat készítése"}</button>
-      </div>`;
-    }).join("")}</div>
-    <div id="orEditor"></div>
-  </div>`;
-  $$("#orRows button").forEach((b) => (b.onclick = (e) => {
-    const id = b.dataset.id;
-    if ((p.outreach || {})[id]) { state.orOpen = id; renderOutreachView(p); }
-    else makeDraft(p, id, e.target);
-  }));
-  if (state.orOpen && (p.outreach || {})[state.orOpen]) renderOrEditor(p, state.orOpen);
-}
+// ── MEGKERESÉS-VÁZLAT ───────────────────────────────────────────────────
 async function makeDraft(p, id, btn) {
   return withLoading(btn, async () => {
     if (!(p.attraction || {})[id]) {
@@ -1515,17 +1911,30 @@ async function makeDraft(p, id, btn) {
     p.outreach[id] = out;
     const cd = candById(p, id); if (cd) cd.last_touched = new Date().toISOString();
     persist();
-    state.orOpen = id;
-    renderOutreachView(p);
+    openPanel(id, "uzenet");
   });
 }
-function renderOrEditor(p, id) {
-  const o = p.outreach[id];
+// Az üzenet fül tartalma. Ugyanaz a szerkesztő, mint korábban — csak ott van,
+// ahol a jelölt többi adata is.
+function renderMessageTab(p, id, box) {
+  if (!box) return;
+  const o = (p.outreach || {})[id];
   const c = candById(p, id) || {};
   const s = orState(p, id);
-  const box = $("#orEditor");
-  box.innerHTML = `<div class="or-editor">
-    <div class="ck-sec-head"><h3>Üzenetvázlat — ${esc(c.name || id)} ${demoTag(o)} ${aiTag(s.reviewed || s.sent)}</h3>
+  const at = (p.attraction || {})[id];
+  if (!o) {
+    box.innerHTML = `<div class="d-sec"><h5>Üzenetvázlat</h5>
+      <p class="kpi-desc" style="margin-top:0">${at
+        ? "A megközelítési terv megvan — ebből készül a vázlat, amit te ellenőrzöl és a saját csatornádon küldesz ki."
+        : "Vázlat előtt megközelítési terv kell: abból tudja az elemzés, mit érdemes mondani ennek az embernek."}</p>
+      <button class="btn btn-primary" id="msgMake">${at ? "Üzenetvázlat készítése" : "Megközelítési terv és vázlat készítése"}</button>
+    </div>`;
+    const mk = $("#msgMake");
+    if (mk) mk.onclick = (e) => makeDraft(p, id, e.target);
+    return;
+  }
+  box.innerHTML = `<div class="or-editor in-panel">
+    <div class="ck-sec-head"><h3>Üzenetvázlat ${demoTag(o)} ${aiTag(s.reviewed || s.sent)}</h3>
       <span class="ck-sec-note">${esc(o.channel || "")}${o.language ? " · " + esc(o.language) : ""}</span></div>
     <input class="subj" id="orSubj" value="${esc(o.subject || "")}" placeholder="Tárgy" />
     <textarea class="body" id="orBody">${esc(o.body || "")}</textarea>
@@ -1540,24 +1949,23 @@ function renderOrEditor(p, id) {
         <button class="ck-mini bad" data-s="negatív">negatív</button>` : ""}
       ${s.sent ? `<button class="btn btn-ghost" id="orReset" title="állapot visszavonása">↺</button>` : ""}
       <button class="btn btn-ghost" id="orArt14">GDPR Art. 14 értesítő</button>
-      <button class="btn btn-ghost" id="orClose">Bezárás</button>
     </div>
     <div id="art14Slot"></div>
     <div class="note">A kiküldés a te csatornádon történik (e-mail, LinkedIn) — itt csak az állapotát rögzíted.</div>
   </div>`;
-  const save = () => {
-    o.subject = $("#orSubj").value;
-    o.body = $("#orBody").value;
-    o.edited_by_recruiter = true;
-    persist();
+  // Újrarender után a háttérben lévő listát is frissítjük, de a panel marad.
+  const refresh = () => {
+    const c2 = candById(p, id);
+    if (c2 && state.drawerId === id) renderDrawer(p, c2);
+    if (state.view === "jeloltek" || state.view === "attekintes") render(state.view);
   };
-  $("#orSubj").onchange = save;
-  $("#orBody").onchange = save;
+  $("#orSubj").onchange = () => syncMessageDraft(p, id);
+  $("#orBody").onchange = () => syncMessageDraft(p, id);
   const ap = $("#orApprove");
   if (ap) ap.onclick = async () => {
-    save();
+    syncMessageDraft(p, id);
     await setOrStatus(p, id, { status: "reviewed" });
-    renderOutreachView(p);
+    refresh();
     toast("Vázlat jóváhagyva.");
   };
   $("#orCopy").onclick = () => {
@@ -1566,22 +1974,32 @@ function renderOrEditor(p, id) {
   };
   const sb = $("#orSent");
   if (sb) sb.onclick = async () => {
-    save();
+    syncMessageDraft(p, id);
     await setOrStatus(p, id, { status: "sent" });
-    renderOutreachView(p);
+    refresh();
     toast("Kiküldés rögzítve.");
   };
-  $$("#orEditor .ck-mini").forEach((b) => (b.onclick = async () => {
+  $$(".ck-mini", box).forEach((b) => (b.onclick = async () => {
     await setOrStatus(p, id, { sentiment: b.dataset.s });
-    renderOutreachView(p);
+    refresh();
   }));
   const rs = $("#orReset");
-  if (rs) rs.onclick = async () => { await setOrStatus(p, id, { status: "reset" }); renderOutreachView(p); };
+  if (rs) rs.onclick = async () => { await setOrStatus(p, id, { status: "reset" }); refresh(); };
   $("#orArt14").onclick = (e) => withLoading(e.target, async () => {
     const a = await api("POST", `/api/project/${p.id}/art14`, { candidateId: id });
     $("#art14Slot").innerHTML = `<div class="mail" style="margin-top:10px"><div class="mail-head"><span class="mail-subj">${esc(a.subject)}</span><span>${esc(a.must_send_within)}</span></div><div class="mail-body">${esc(a.body)}</div></div><div class="note">${esc(a.note)}</div>`;
   });
-  $("#orClose").onclick = () => { state.orOpen = null; renderOutreachView(p); };
+}
+// A szerkesztőmező tartalma `change`-re (fókuszvesztéskor) mentődik. Fülváltásnál
+// és újrarendernél ez nem mindig ér oda — ezért minden ilyen előtt kézzel mentünk.
+function syncMessageDraft(p, id) {
+  const subj = $("#orSubj"), body = $("#orBody");
+  const o = (p.outreach || {})[id];
+  if (!o || (!subj && !body)) return;
+  if (subj) o.subject = subj.value;
+  if (body) o.body = body.value;
+  o.edited_by_recruiter = true;
+  persist();
 }
 async function setOrStatus(p, id, body) {
   try {
@@ -1594,8 +2012,17 @@ async function setOrStatus(p, id, body) {
 }
 
 // ── ÜGYFÉL ÉS INTERJÚ ───────────────────────────────────────────────────
-function renderClientView(p) {
-  renderAdvisory(p.advisory);
+// Az interjúterv a folyamat végén dolgozik: amíg nincs pozitív válasz,
+// elmagyarázza, mire vár, ahelyett hogy üres képernyőt adna.
+function renderInterviewView(p) {
+  const gate = $("#interjuGate");
+  if (gate) {
+    gate.innerHTML = hasPositiveReply(p) ? "" :
+      `<div class="dep-note"><span>Az interjúterv az első <b>pozitív</b> válasz után válik hasznossá — addig nem tudni, kivel készül. A negatív és a semleges válasz nem oldja fel.</span>
+       <button class="btn btn-primary" id="gateToCand">Jelöltek</button></div>`;
+    const g = $("#gateToCand");
+    if (g) g.onclick = () => showView("jeloltek");
+  }
   renderInterview(p.interview);
 }
 function renderAdvisory(o) {
@@ -1616,7 +2043,10 @@ function renderInterview(o) {
 // ── EREDMÉNYEK ──────────────────────────────────────────────────────────
 function renderResults(p) {
   const v = $("#view-eredmenyek");
-  const vals = Object.values(p.outreach_status || {});
+  // A számok az aktív merítésre vonatkoznak, ahogy a tölcsér is. Ez akkor
+  // tér el a korábbitól, ha egy megkeresett jelöltet később kizárnak.
+  const actIds = new Set(activeCandidates(p).map((c) => c.id));
+  const vals = Object.keys(p.outreach_status || {}).filter((k) => actIds.has(k)).map((k) => p.outreach_status[k]);
   const sent = vals.filter((s) => s && s.sent_at).length;
   const replied = vals.filter((s) => s && s.replied).length;
   const positive = vals.filter((s) => s && s.replied && s.sentiment === "pozitív").length;
@@ -1631,7 +2061,7 @@ function renderResults(p) {
     <div class="stage-head"><h2>Eredmények</h2>
       <p class="stage-sub">A számok a Megkeresések nézetben rögzített kiküldésekből és válaszokból épülnek — a rendszer nem küld semmit, kitalált számot nem mutatunk.</p></div>
     <div class="res-grid">
-      <div class="res-card"><div class="res-num">${sent}</div><div class="res-lbl">Kiküldött megkeresés</div><div class="res-sub">${Object.keys(p.outreach || {}).length} vázlatból</div></div>
+      <div class="res-card"><div class="res-num">${sent}</div><div class="res-lbl">Kiküldött megkeresés</div><div class="res-sub">${Object.keys(p.outreach || {}).filter((k) => actIds.has(k)).length} vázlatból</div></div>
       <div class="res-card"><div class="res-num acc">${respRate == null ? "—" : respRate + "%"}</div><div class="res-lbl">Válaszadási arány</div><div class="res-sub">${replied}/${sent || 0} kiküldött megkeresésre érkezett válasz</div></div>
       <div class="res-card"><div class="res-num acc">${posRate == null ? "—" : posRate + "%"}</div><div class="res-lbl">Pozitív válaszok aránya</div><div class="res-sub">${positive}/${sent || 0} — a semleges válasz nem számít pozitívnak</div></div>
     </div>
@@ -1673,27 +2103,37 @@ function renderResults(p) {
 
 // ── JEGYZETEK ───────────────────────────────────────────────────────────
 function renderNotes(p) {
-  const v = $("#view-jegyzetek");
-  const mem = (p.memory || []).slice().reverse();
+  const v = $("#notesBody");
+  if (!v) return;
   const cands = p.candidates || [];
   const f = renderNotes._filter || "";
+  const mem = (p.memory || []).slice().reverse();
   const shown = f ? mem.filter((e) => (e.kind || "note") === f) : mem;
-  v.innerHTML = `<div class="stage">
-    <div class="stage-head"><h2>Jegyzetek</h2>
-      <p class="stage-sub">Megbízás- és jelölt-szintű jegyzetek, időrendben.</p></div>
-    <div class="row">
-      <select id="noteKind"><option value="note">megbízás</option><option value="candidate">jelölt</option></select>
-      <select id="noteCand" class="hidden">${cands.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select>
-      <input id="noteInput" class="brief-line" placeholder="Jegyzet…" />
-      <button id="noteSave" class="btn btn-primary">Mentés</button>
-      <select id="noteFilter" style="margin-left:auto"><option value="">minden jegyzet</option><option value="note" ${f === "note" ? "selected" : ""}>megbízás</option><option value="candidate" ${f === "candidate" ? "selected" : ""}>jelölt</option></select>
+  const nameOf = (id) => (candById(p, id) || {}).name || id;
+  const coach = (p.coach_notes || [])[(p.coach_notes || []).length - 1];
+  v.innerHTML = `
+    <div class="d-sec"><h5>Új jegyzet</h5>
+      <div class="row">
+        <select id="noteKind"><option value="note">megbízás</option><option value="candidate">jelölt</option></select>
+        <select id="noteCand" class="hidden">${cands.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input id="noteInput" class="brief-line" placeholder="Jegyzet…" />
+        <button id="noteSave" class="btn btn-primary">Mentés</button>
+      </div>
     </div>
-    <div style="margin-top:12px">${shown.map((e) => {
-      const cn = e.candidate_id ? (candById(p, e.candidate_id) || {}).name : null;
-      return `<div class="note-row"><span class="note-kind">${e.kind === "candidate" ? "jelölt" : "megbízás"}</span>
-        <div class="note-body">${cn ? `<b>${esc(cn)}</b> — ` : ""}${esc(e.note)}<div class="note-ts">${esc((e.ts || "").slice(0, 16).replace("T", " "))}</div></div></div>`;
-    }).join("") || `<div class="ov-empty sm">Még nincs jegyzet.</div>`}</div>
-  </div>`;
+    <div class="d-sec"><h5>Módszertani segítség</h5>
+      <p class="kpi-desc" style="margin-top:0">Írd le, hol tartasz vagy hol akadtál el — javaslatot kapsz a következő lépésre.</p>
+      <div class="row"><input id="coachCtx" class="brief-line" placeholder="Mit csináltál / hol akadtál el? (opcionális)" />
+        <button id="coachBtn" class="btn">Javaslat kérése</button></div>
+      <div id="coachOut" class="out"></div>
+    </div>
+    <div class="d-sec"><h5>Előzmény
+        <select id="noteFilter" style="margin-left:auto"><option value="">minden</option><option value="note" ${f === "note" ? "selected" : ""}>megbízás</option><option value="candidate" ${f === "candidate" ? "selected" : ""}>jelölt</option></select>
+      </h5>
+      ${renderNoteList(shown, { candidateName: nameOf, empty: "Még nincs jegyzet ebben a megbízásban." })}
+    </div>`;
+  if (coach) renderCoach(coach);
   $("#noteKind").onchange = (e) => $("#noteCand").classList.toggle("hidden", e.target.value !== "candidate");
   $("#noteFilter").onchange = (e) => { renderNotes._filter = e.target.value; renderNotes(p); };
   $("#noteSave").onclick = () => {
@@ -1706,6 +2146,13 @@ function renderNotes(p) {
     renderNotes(p);
     toast("Jegyzet mentve.");
   };
+  $("#coachBtn").onclick = (e) => withLoading(e.target, async () => {
+    const out = await api("POST", `/api/project/${p.id}/coach`, { context: $("#coachCtx").value });
+    p.coach_notes = p.coach_notes || [];
+    p.coach_notes.push({ ts: new Date().toISOString(), ...out });
+    persist();
+    renderCoach(out);
+  });
 }
 
 // ── STATIKUS GOMBOK (pozíció / célpiac / ügyfél nézetek) ────────────────
@@ -1811,30 +2258,104 @@ $("#interviewBtn").onclick = (e) => needEngagement() && withLoading(e.target, as
 // ── GLOBÁLIS ────────────────────────────────────────────────────────────
 $("#newEngBtn").onclick = () => { if (state.view !== "home") closeEngagement(); openNewEngForm(); };
 $("#candDrawerClose").onclick = () => closeDrawer();
-$$(".step").forEach((s) => (s.onclick = (e) => {
+$("#scrim").onclick = () => { closeDrawer(); closeNotesDrawer(); closeMoreSheet(); };
+$("#notesClose").onclick = () => closeNotesDrawer();
+$("#notesOpen").onclick = () => openNotesDrawer();
+window.addEventListener("popstate", () => { if (state.drawerId) closeDrawer(true); });
+// Eseménydelegálás: az oldalsáv újrarenderelése után is működik, és a
+// későbbi navigációs elemek ingyen megkapják.
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("[data-view]");
+  if (!a) return;
   e.preventDefault();
-  const v = s.dataset.view;
+  const v = a.dataset.view;
   if (v === "home") { closeEngagement(); return; }
   showView(v);
-}));
+});
+
+/* ── GLOBÁLIS KERESŐ ─────────────────────────────────────────────────────
+   A gépelés nem visz el sehova. A Jelöltek nézetben helyben szűr, máshol
+   találati listát nyit, és a találat a jelöltpanelt nyitja meg — a nézet
+   marad, ahol voltál.                                                    */
+function closeSearchResults() {
+  const box = $("#searchResults");
+  if (!box) return;
+  box.classList.add("hidden");
+  box.innerHTML = "";
+  const inp = $("#globalSearch");
+  if (inp) inp.setAttribute("aria-expanded", "false");
+}
+function renderSearchResults(q) {
+  const box = $("#searchResults");
+  if (!box) return;
+  if (!q || !state.project) return closeSearchResults();
+  const p = state.project;
+  const hits = (p.candidates || []).filter((x) =>
+    `${x.name} ${x.headline} ${x.current_company} ${x.location}`.toLowerCase().includes(q)).slice(0, 8);
+  box.innerHTML = hits.length
+    ? hits.map((x) => {
+        const t = effTier(p, x.id);
+        return `<button class="sr-row" role="option" data-id="${esc(x.id)}">
+          <span class="sr-tier">${esc(t || "—")}</span>
+          <span class="sr-main"><b>${esc(x.name)}</b><span class="sr-sub">${esc([x.headline, x.current_company].filter(Boolean).join(" · "))}</span></span>
+          <span class="sr-next">${esc(candNext(p, x))}</span>
+        </button>`;
+      }).join("")
+    : `<div class="sr-empty">Nincs találat erre: „${esc(q)}”</div>`;
+  box.classList.remove("hidden");
+  $("#globalSearch").setAttribute("aria-expanded", "true");
+  $$(".sr-row", box).forEach((b) => (b.onclick = () => openPanel(b.dataset.id)));
+}
 $("#globalSearch").oninput = (e) => {
-  state.candFilter.q = e.target.value.trim().toLowerCase();
-  if (state.project && state.view !== "jeloltek") showView("jeloltek");
-  else if (state.project) renderCandidatesView(state.project);
+  const q = e.target.value.trim().toLowerCase();
+  state.candFilter.q = q;
+  if (!state.project) return;
+  if (state.view === "jeloltek") { closeSearchResults(); renderCandidatesView(state.project); }
+  else renderSearchResults(q);
 };
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".search-wrap")) closeSearchResults();
+});
 document.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f" && state.project) {
     e.preventDefault();
     $("#globalSearch").focus();
   }
-  if (e.key === "Escape") closeDrawer();
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j" && state.project) {
+    e.preventDefault();
+    state.notesOpen ? closeNotesDrawer() : openNotesDrawer();
+  }
+  if (e.key === "Escape") {
+    if (!$("#searchResults").classList.contains("hidden")) closeSearchResults();
+    else if (state.moreOpen) closeMoreSheet();
+    else if (state.notesOpen) closeNotesDrawer();
+    else closeDrawer();
+  }
+  // Fókuszcsapda: nyitott panelből a Tab ne szökjön ki a háttérbe.
+  if (e.key === "Tab" && anyDrawerOpen()) {
+    const f = $$('a[href],button:not([disabled]),input:not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])', state.drawerId ? $("#candDrawer") : $("#notesDrawer"))
+      .filter((n) => n.offsetParent !== null);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
 });
+
+// A tábla/lista váltás a képernyőmérettel is változhat — kövessük.
+if (typeof matchMedia === "function") {
+  const mq = matchMedia(NARROW);
+  const onChange = () => { if (state.project && state.view === "jeloltek") renderCandidatesView(state.project); };
+  if (mq.addEventListener) mq.addEventListener("change", onChange);
+  else if (mq.addListener) mq.addListener(onChange);
+}
 
 // Init — a visszatérő felhasználót a legutóbbi állapothoz visszük.
 (async () => {
   await loadStatus();
   const ui = loadUi();
   if (ui.homeFilter) state.homeFilter = ui.homeFilter;
+  if (ui.candView === "list" || ui.candView === "board") state.candView = ui.candView;
   if (ui.projectId && lsGet(ui.projectId)) {
     openEngagement(ui.projectId, ui.view && ui.view !== "home" ? ui.view : "attekintes");
   } else {

@@ -25,16 +25,8 @@
 
       <div id="engNav" class="hidden">
         <div class="side-label" id="engNavLabel">Megbízás</div>
-        <nav class="steps">
-          <a href="#" class="step" data-view="attekintes"><span class="dot"></span>Áttekintés</a>
-          <a href="#" class="step" data-view="pozicio"><span class="dot"></span>Pozíció és brief</a>
-          <a href="#" class="step" data-view="celpiac"><span class="dot"></span>Célpiac</a>
-          <a href="#" class="step" data-view="jeloltek"><span class="dot"></span>Jelöltek</a>
-          <a href="#" class="step" data-view="megkeresesek"><span class="dot"></span>Megkeresések</a>
-          <a href="#" class="step" data-view="ugyfel"><span class="dot"></span>Ügyfél és interjú</a>
-          <a href="#" class="step" data-view="eredmenyek"><span class="dot"></span>Eredmények</a>
-          <a href="#" class="step" data-view="jegyzetek"><span class="dot"></span>Jegyzetek</a>
-        </nav>
+        <nav class="steps" id="engSteps"></nav>
+        <button class="side-notes" id="notesOpen" title="Napló (⌘J)">Napló megnyitása</button>
       </div>
 
       <div class="side-foot">
@@ -47,14 +39,19 @@
     <!-- ── MAIN ── -->
     <main class="main">
       <header class="topbar">
-        <div class="search-pill">
-          <input id="globalSearch" placeholder="Jelölt keresése…" autocomplete="off" />
-          <span class="kbd">⌘ F</span>
+        <div class="search-wrap">
+          <div class="search-pill">
+            <input id="globalSearch" placeholder="Jelölt keresése…" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="searchResults" />
+            <span class="kbd">⌘ F</span>
+          </div>
+          <div id="searchResults" class="search-results hidden" role="listbox" aria-label="Találatok"></div>
         </div>
         <div class="top-right">
           <div class="badges" id="badgesTop"></div>
         </div>
       </header>
+
+      <div id="subNav" class="subnav" role="tablist" aria-label="Lépések a fázison belül"></div>
 
       <div class="scroll" id="scroll">
 
@@ -102,43 +99,69 @@
             <div class="stage">
               <div class="stage-head"><h2>Célpiac</h2>
                 <p class="stage-sub">Hol dolgoznak a szerephez illő emberek, és milyen keresésekkel érdemes megtalálni őket. A terv és a térkép a futás után is szerkeszthető — kézzel vagy a stratégia-asszisztenssel.</p></div>
-              <div class="row">
-                <button id="queryBtn" class="btn">Keresési terv készítése</button>
-                <button id="talentBtn" class="btn">Célpiac-térkép</button>
-                <button id="discoverBtn" class="btn btn-primary">Jelöltkutatás indítása</button>
-                <button id="queryResetBtn" class="btn btn-ghost" title="A kézi módosítások elvetésével új tervet kér">Új terv nulláról</button>
-              </div>
-              <details class="adv-details"><summary>Adatforrás és részletek</summary>
-                <div class="row" style="margin-top:8px">
-                  <span class="src-toggle">Adatforrás:
-                    <select id="sourceSel">
-                      <option value="auto">automatikus</option>
-                      <option value="firecrawl">nyilvános webes források (élő)</option>
-                      <option value="synthetic">mintaadatok</option>
-                    </select>
-                  </span>
+
+              <div class="steps3">
+                <div class="stepc" id="stepPlan">
+                  <div class="stepn">① TERV</div>
+                  <div class="stepc-h">Keresési terv</div>
+                  <p class="kpi-desc">Célpozíciók, célcégek, szinonimák és lekérdezések. Ez adja a kutatás alapját.</p>
+                  <div class="row">
+                    <button id="queryBtn" class="btn btn-primary">Keresési terv készítése</button>
+                    <details class="stepmenu"><summary aria-label="További műveletek">⋯</summary>
+                      <button id="queryResetBtn" class="btn btn-ghost" title="A kézi módosítások elvetésével új tervet kér">Új terv nulláról</button>
+                    </details>
+                  </div>
                 </div>
-              </details>
-              <div id="queryOut" class="out"></div>
-              <div id="exclOut" class="out"></div>
-              <div id="talentOut" class="out"></div>
+                <div class="stepc" id="stepMap">
+                  <div class="stepn">② TÉRKÉP</div>
+                  <div class="stepc-h">Célpiac-térkép</div>
+                  <p class="kpi-desc" id="stepMapNote">Célcégek, versenytárs-klaszterek, közösségek.</p>
+                  <div class="row"><button id="talentBtn" class="btn">Célpiac-térkép</button></div>
+                </div>
+                <div class="stepc" id="stepDisc">
+                  <div class="stepn">③ KUTATÁS</div>
+                  <div class="stepc-h">Jelöltkutatás</div>
+                  <p class="kpi-desc" id="stepDiscNote">A terv alapján keresi meg az embereket.</p>
+                  <div class="row">
+                    <button id="discoverBtn" class="btn btn-primary">Jelöltkutatás indítása</button>
+                    <span class="src-toggle">forrás:
+                      <select id="sourceSel" aria-label="Adatforrás">
+                        <option value="auto">automatikus</option>
+                        <option value="firecrawl">nyilvános webes források (élő)</option>
+                        <option value="synthetic">mintaadatok</option>
+                      </select>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <div id="discoverNote"></div>
+
+              <div class="cel-grid">
+                <div class="cel-main">
+                  <div id="queryOut" class="out"></div>
+                  <div id="talentOut" class="out"></div>
+                  <div id="stratChat"></div>
+                </div>
+                <aside class="cel-side"><div id="exclOut" class="out"></div></aside>
+              </div>
             </div>
-            <div id="stratChat"></div>
           </section>
 
           <section id="view-jeloltek" class="view eng-view"></section>
 
-          <section id="view-megkeresesek" class="view eng-view"></section>
-
           <section id="view-ugyfel" class="view eng-view">
             <div class="stage">
-              <div class="stage-head"><h2>Ügyfélegyeztetés</h2>
-                <p class="stage-sub">Felkészülés a hiring managerrel való egyeztetésre: tisztázandó briefpontok, piaci jelek, kockázatok.</p></div>
+              <div class="stage-head"><h2>Ügyfél-egyeztetés</h2>
+                <p class="stage-sub">Felkészülés a hiring managerrel való egyeztetésre: tisztázandó briefpontok, piaci jelek, kockázatok. Ezek a kutatás előtt még alakíthatják a feltételeket.</p></div>
               <div class="row"><button id="advisoryBtn" class="btn btn-primary">Egyeztetési javaslatok</button></div>
               <div id="advisoryOut" class="out"></div>
             </div>
-            <div class="stage" style="margin-top:16px">
+          </section>
+
+          <section id="view-interju" class="view eng-view">
+            <div id="interjuGate"></div>
+            <div class="stage">
               <div class="stage-head"><h2>Interjúterv</h2>
                 <p class="stage-sub">Kompetencia-alapú kérdések: mit kérdezz, és mit jelez egy erős válasz.</p></div>
               <div class="row"><button id="interviewBtn" class="btn btn-primary">Interjúterv készítése</button></div>
@@ -148,7 +171,6 @@
 
           <section id="view-eredmenyek" class="view eng-view"></section>
 
-          <section id="view-jegyzetek" class="view eng-view"></section>
         </section>
 
         <div class="foot-space"></div>
@@ -156,10 +178,34 @@
     </main>
   </div>
 
-  <!-- Jelölt részletes nézet (oldalsó panel) -->
-  <div id="candDrawer" class="drawer drawer-wide hidden">
-    <div class="drawer-head"><h3 id="candDrawerTitle">Jelölt</h3><button id="candDrawerClose" class="btn btn-ghost">✕</button></div>
+  <!-- Jelöltpanel: egy jelölt minden adata egy helyen, fülekre bontva -->
+  <div id="scrim" class="scrim hidden"></div>
+  <div id="candDrawer" class="drawer drawer-wide hidden" role="dialog" aria-modal="true" aria-labelledby="candDrawerTitle">
+    <div class="drawer-head">
+      <div class="drawer-head-txt">
+        <h3 id="candDrawerTitle">Jelölt</h3>
+        <div id="candDrawerSub" class="crow-head"></div>
+      </div>
+      <button id="candDrawerClose" class="btn btn-ghost" aria-label="Panel bezárása" title="Bezárás (Esc)">✕</button>
+    </div>
+    <div id="candTabs" class="tabs" role="tablist"></div>
     <div id="candDrawerBody" class="drawer-body"></div>
+  </div>
+
+  <!-- Napló: megbízás- és jelöltszintű jegyzetek, minden képernyőről elérhető -->
+  <div id="notesDrawer" class="drawer hidden" role="dialog" aria-modal="true" aria-labelledby="notesTitle">
+    <div class="drawer-head">
+      <div class="drawer-head-txt"><h3 id="notesTitle">Napló</h3><div class="crow-head">Jegyzetek és módszertani segítség</div></div>
+      <button id="notesClose" class="btn btn-ghost" aria-label="Napló bezárása" title="Bezárás (Esc)">✕</button>
+    </div>
+    <div id="notesBody" class="drawer-body"></div>
+  </div>
+
+  <!-- Alsó navigáció: keskeny képernyőn a fázisok, ⋯ mögött a ritkábbak -->
+  <nav id="botNav" class="botnav hidden" aria-label="Fő navigáció"></nav>
+  <div id="moreSheet" class="sheet hidden" role="dialog" aria-modal="true" aria-label="További műveletek">
+    <div class="sheet-grip"></div>
+    <div id="moreBody" class="sheet-body"></div>
   </div>
 
   <div id="toast" class="toast hidden"></div>
