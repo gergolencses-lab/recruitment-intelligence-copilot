@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>JEL — a folyamat: mi mit csinál</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23263653'/><g stroke-linecap='round' stroke-width='7' fill='none'><path d='M14 17 L38 27' stroke='%23FF5A5F'/><path d='M14 32 L36 32' stroke='%2320CFA8'/><path d='M14 47 L38 37' stroke='%2320CFA8'/></g><circle cx='48' cy='32' r='5.5' fill='%23FF5A5F'/></svg>" />
+<style>
+/* JEL design-nyelv — az app/public/styles.css tokenjeivel egyezően. */
+:root{
+  --bg:#F6F4EF; --surface:#fff;
+  --navy:#263653; --navy-2:#1D2A43; --ink:#172238;
+  --accent:#1DBF9C; --accent-bright:#20CFA8; --accent-ink:#0B7D66;
+  --accent-soft:#E2F6F0; --accent-tint:#D5F3EA;
+  --coral:#FF5A5F; --coral-ink:#D93A40; --coral-soft:#FFE9E9;
+  --line:#EAE6DC; --line-2:#DDD8CA; --divider:#EFECE4;
+  --ink-2:#2A3550; --ink-3:#4A5570; --mut:#6F7890; --mut-2:#8B93A8;
+  --warn:#B07818; --warn-bg:#F9EFD9;
+  --blue:#3D5A96; --blue-bg:#E4EBF7;
+  --radius:12px;
+  --shadow:0 1px 2px rgba(23,34,56,.05), 0 8px 24px rgba(23,34,56,.06);
+  --font:"Avenir Next","Avenir","Futura","Segoe UI",system-ui,-apple-system,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:var(--font);-webkit-font-smoothing:antialiased;background:var(--bg);color:var(--ink-2);font-size:14px;line-height:1.5}
+::selection{background:var(--accent-tint)}
+
+/* ── Fejléc ── */
+header{background:var(--navy);color:#fff;padding:26px 30px 24px}
+.hwrap{max-width:1320px;margin:0 auto;display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+.mark{width:44px;height:44px;flex:none}
+.mark svg{width:44px;height:44px;display:block}
+h1{font-size:24px;font-weight:800;letter-spacing:-.01em;margin:0;color:#fff}
+.sub{font-size:13px;color:rgba(255,255,255,.68);margin-top:5px;max-width:64ch}
+.brandname{font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--accent-bright);text-transform:uppercase;margin-bottom:3px}
+
+/* ── Jelmagyarázat ── */
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,.14);width:100%}
+.lg{display:flex;align-items:center;gap:7px;font-size:11.5px;color:rgba(255,255,255,.75)}
+.lg i{width:11px;height:11px;border-radius:3px;display:block;flex:none}
+
+/* ── Elrendezés ── */
+.page{max-width:1320px;margin:0 auto;padding:24px 30px 60px;display:grid;grid-template-columns:minmax(0,1fr) 366px;gap:26px;align-items:start}
+@media (max-width:1080px){ .page{grid-template-columns:1fr;padding:18px 16px 300px} }
+
+/* ── Fázis-sáv ── */
+.phase{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 18px 18px;margin-bottom:16px}
+.phase-head{display:flex;align-items:baseline;gap:10px;margin-bottom:4px}
+.phase-n{font-size:10.5px;font-weight:800;letter-spacing:.1em;color:var(--accent-ink);background:var(--accent-soft);padding:3px 8px;border-radius:5px;text-transform:uppercase;flex:none}
+.phase-h{font-size:16px;font-weight:700;color:var(--ink);margin:0}
+.phase-q{font-size:12.5px;color:var(--mut);margin:0 0 14px}
+
+/* ── Lépés-kártyák ── */
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch}
+.node{appearance:none;font:inherit;text-align:left;cursor:pointer;background:var(--surface);
+  border:1px solid var(--line-2);border-left:3px solid var(--mut-2);border-radius:9px;
+  padding:9px 11px;min-width:172px;flex:1 1 172px;max-width:250px;
+  display:flex;flex-direction:column;gap:3px;transition:box-shadow .12s,transform .12s,border-color .12s}
+.node:hover{box-shadow:0 4px 14px rgba(23,34,56,.10);transform:translateY(-1px)}
+.node:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.node.on{border-color:var(--navy);box-shadow:0 0 0 2px var(--accent-tint),0 4px 14px rgba(23,34,56,.10)}
+.n-kind{font-size:9.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--mut)}
+.n-name{font-size:13px;font-weight:700;color:var(--ink);line-height:1.28}
+.n-one{font-size:11.5px;color:var(--mut);line-height:1.35}
+.node.k-ai{border-left-color:var(--accent)}       .node.k-ai .n-kind{color:var(--accent-ink)}
+.node.k-ember{border-left-color:var(--navy)}      .node.k-ember .n-kind{color:var(--navy)}
+.node.k-adat{border-left-color:var(--blue)}       .node.k-adat .n-kind{color:var(--blue)}
+.node.k-szabaly{border-left-color:var(--warn)}    .node.k-szabaly .n-kind{color:var(--warn)}
+.node.k-jog{border-left-color:var(--coral)}       .node.k-jog .n-kind{color:var(--coral-ink)}
+.arrow{align-self:center;color:var(--dot,#BCC1CE);font-size:15px;flex:none;user-select:none;padding:0 1px}
+/* Egymás alá csúszott kártyáknál a jobbra mutató nyíl félrevezető. */
+@media (max-width:760px){ .arrow{display:none} .node{max-width:none} }
+.new-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--coral);margin-left:5px;vertical-align:middle}
+
+/* ── Kapu-sáv ── */
+.gate{margin-top:12px;background:var(--warn-bg);border:1px solid #EBDCB8;border-radius:9px;padding:9px 12px;font-size:12px;color:#6B4A10}
+.gate b{color:#5A3E0C}
+
+/* ── Állapot-létra ── */
+.ladder{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:14px;padding-top:14px;border-top:1px dashed var(--line-2)}
+.lad-l{font-size:10.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);width:100%;margin-bottom:2px}
+.lad{background:var(--bg);border:1px solid var(--line-2);border-radius:99px;padding:4px 11px;font-size:11.5px;font-weight:600;color:var(--ink-3)}
+.lad.side{background:var(--warn-bg);border-color:#EBDCB8;color:#6B4A10}
+.lad.out{background:var(--coral-soft);border-color:#F7D3D4;color:var(--coral-ink)}
+
+/* ── Részlet-panel ── */
+.detail{position:sticky;top:20px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+.d-top{padding:16px 18px 14px;border-bottom:1px solid var(--divider)}
+.d-kind{font-size:9.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--mut)}
+.d-title{font-size:17px;font-weight:800;color:var(--ink);margin:3px 0 0;letter-spacing:-.01em}
+.d-where{font-size:11.5px;color:var(--mut);margin-top:5px}
+.d-body{padding:15px 18px 18px}
+.d-body p{margin:0 0 12px;font-size:13.5px;color:var(--ink-3)}
+.d-why{background:var(--accent-soft);border-left:3px solid var(--accent);border-radius:0 8px 8px 0;padding:10px 12px;margin-top:2px}
+.d-why-l{font-size:9.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-ink);margin-bottom:4px}
+.d-why p{margin:0;font-size:12.5px;color:#14513F}
+.d-why.coral{background:var(--coral-soft);border-left-color:var(--coral)}
+.d-why.coral .d-why-l{color:var(--coral-ink)} .d-why.coral p{color:#7C2226}
+.d-hint{padding:14px 18px 18px;font-size:12.5px;color:var(--mut)}
+.d-close{display:none}
+@media (max-width:1080px){
+  .detail{position:fixed;left:0;right:0;bottom:0;top:auto;border-radius:14px 14px 0 0;
+    box-shadow:0 -8px 32px rgba(23,34,56,.18);max-height:62vh;overflow-y:auto;z-index:20}
+  .d-close{display:block;position:absolute;top:12px;right:12px;appearance:none;border:1px solid var(--line-2);
+    background:var(--surface);border-radius:8px;width:30px;height:30px;font-size:15px;color:var(--mut);cursor:pointer}
+}
+
+/* ── Lábléc ── */
+footer{max-width:1320px;margin:0 auto;padding:0 30px 46px;font-size:12px;color:var(--mut)}
+footer a{color:var(--accent-ink)}
+.notdo{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);margin-bottom:18px}
+.notdo h3{font-size:13px;font-weight:800;color:var(--ink);margin:0 0 4px;letter-spacing:.01em}
+.notdo p.s{font-size:12px;color:var(--mut);margin:0 0 10px}
+.notdo ul{margin:0;padding-left:17px;font-size:12.5px;color:var(--ink-3)}
+.notdo li{margin-bottom:5px}
+.notdo li b{color:var(--ink-2)}
+@media print{ header{background:#fff;color:#000} .detail{display:none} .node{break-inside:avoid} }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hwrap">
+    <div class="mark">
+      <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <g stroke-linecap="round" stroke-width="5.5" fill="none">
+          <path d="M8 11 L28 19.5" stroke="#FF5A5F"/><path d="M8 24 L26 24" stroke="#20CFA8"/><path d="M8 37 L28 28.5" stroke="#20CFA8"/>
+        </g><circle cx="37" cy="24" r="4.5" fill="#FF5A5F"/>
+      </svg>
+    </div>
+    <div>
+      <div class="brandname">JEL · Jelöltből jó döntés</div>
+      <h1>A folyamat — mi mit csinál</h1>
+      <p class="sub">Kattints bármelyik lépésre: megjelenik, mit csinál, és ahol nem nyilvánvaló, miért így. A <span style="color:#FF5A5F">●</span> jelölt lépések azok, amiket máshol nem találsz meg.</p>
+    </div>
+    <div class="legend">
+      <span class="lg"><i style="background:#1DBF9C"></i>AI-lépés — javaslatot ad</span>
+      <span class="lg"><i style="background:#A9B6CC"></i>A te munkád / döntésed</span>
+      <span class="lg"><i style="background:#6E8FD1"></i>Adatgyűjtés</span>
+      <span class="lg"><i style="background:#B07818"></i>Automatikus szabály</span>
+      <span class="lg"><i style="background:#FF5A5F"></i>Jogi lépés</span>
+    </div>
+  </div>
+</header>
+
+<div class="page">
+  <main id="flow"></main>
+
+  <aside class="detail" id="detail" aria-live="polite">
+    <button class="d-close" id="dClose" aria-label="Bezárás">✕</button>
+    <div id="detailBody"></div>
+  </aside>
+</div>
+
+<footer>
+  <div class="notdo">
+    <h3>Amit a rendszer tudatosan NEM csinál</h3>
+    <p class="s">Ezek nem hiányzó funkciók, hanem termékdöntések.</p>
+    <ul>
+      <li><b>Nem küld üzenetet</b> — a kiküldés a te csatornádon és a te felelősségeddel történik.</li>
+      <li><b>Nem scrapel belépett LinkedIn-t</b> — ToS-bukó és ban-kockázat; a mélységet a publikus források adják.</li>
+      <li><b>Nem utasít el automatikusan jelöltet</b> — a fit-ítélet emberi döntést támogat, nem helyettesít.</li>
+      <li><b>Nem ejt ki némán jelöltet a rangsorból</b> — mindenki megjelenik, akár elutasító javaslattal.</li>
+      <li><b>Nem állít kitalált tényt a jelöltről</b> — ami nem vezethető vissza jelre, automatikusan kikerül.</li>
+      <li><b>Nem tárol szerveroldalon megbízás-adatot</b> — a munka a te böngésződben él.</li>
+    </ul>
+  </div>
+  Forrás és részletes leírás: <a href="./FOLYAMAT.md">FOLYAMAT.md</a> · Súgó- és GYIK-terv: <a href="./HELP-FAQ-TERV.md">HELP-FAQ-TERV.md</a>
+</footer>
+
+<script>
+/* A tartalom egyetlen adatszerkezetben — a FOLYAMAT.md 4. fejezetének rövidített változata. */
+const KIND = { ai:"AI-lépés", ember:"A te döntésed", adat:"Adatgyűjtés", szabaly:"Automatikus szabály", jog:"Jogi lépés" };
+
+const PHASES = [
+  { n:"Belépés", h:"Megbízások és áttekintés", q:"Hol tartok, és mi a következő mozdulat?", steps:[
+    { id:"home", kind:"ember", name:"Megbízások", one:"A munkatér nyitóképernyője",
+      where:"Nyitóképernyő",
+      what:"Itt élnek a megbízásaid: egy megbízás egy ügyfél egy konkrét pozíciója, nem általános projekt. A kártya mutatja a státuszt, a tölcsért (felkutatva · prioritásos · megkeresve · válaszolt) és a kiemelt következő teendőt. A szűrők azt válaszolják meg, mibe kell ma belenyúlni." },
+    { id:"new", kind:"ember", name:"Új megbízás", one:"2 lépés: alapadatok, majd brief",
+      where:"Nyitóképernyő → Új megbízás",
+      what:"Először az alapadatok — pozíció és ügyfél kötelező —, utána a nyers brief, amit később is beilleszthetsz. Az ügyfél neve nem formalitás: ez vezérli a kizárási motort, és negatív szűrőként bekerül a keresési lekérdezésekbe." },
+    { id:"ov", kind:"szabaly", name:"Következő teendő", one:"Egy kiemelt lépés megbízásonként", isNew:true,
+      where:"Áttekintés",
+      what:"Egyetlen kiemelt lépés, alatta a legfeljebb öt elakadt jelölt, mindegyik egy kattintással elintézhető. A javaslat automatikusan frissül, ahogy haladsz.",
+      why:"Nem dashboard, hanem munkasor. Szabálysor dönti el, nem hangulat: az első illeszkedő szabály nyer. Nem azt mutatja, mi történt, hanem azt, mi a következő mozdulat — így nem kényszerít sorrendet, de mindig van javaslat." },
+  ]},
+
+  { n:"1 · Előkészítés", h:"Mit keresünk", q:"A brieftől a keresési tervig — itt dől el, kit fogunk megtalálni.", steps:[
+    { id:"brief", kind:"ai", name:"Brief elemzése", one:"Nyers briefből strukturált javaslat",
+      where:"Brief és pozíció",
+      what:"A hiring manager nyers briefjéből javasolt pozíció-összefoglalót készít, és szétszedi: elengedhetetlen feltételek, előnyt jelent, tisztázandó pontok, feltételezett igények, keresési hipotézisek.",
+      why:"Nem összefoglal, hanem kérdez. A „tisztázandó pont” a hiring managernek szóló kérdés — ellentmondás, hiány, fölösleges megkötés —, a „feltételezett igény” pedig a rendszer saját, ellenőrizendő találgatása. A kettő szándékosan külön blokkban van." },
+    { id:"final", kind:"ember", name:"Véglegesített brief", one:"A te változatod megy tovább", isNew:true,
+      where:"Brief és pozíció → jobb hasáb",
+      what:"Az AI-javaslatból indul, de te szerkeszted, és a te jóváhagyott változatod az, ami továbbmegy a keresésbe, a megkeresésekbe és az ügyfél-egyeztetésbe. Az AI eredeti javaslata alatta megmarad összehasonlításra.",
+      why:"Itt válik el a javaslat a döntéstől. Minden későbbi lépés a véglegesített briefre épül, nem az AI kimenetére — ezért lehet a rendszernek határozott véleménye anélkül, hogy elvenné a te felelősségedet." },
+    { id:"advisory", kind:"ai", name:"Ügyfél-egyeztetés", one:"Felkészülés a hiring managerrel",
+      where:"Ügyfél-egyeztetés",
+      what:"Egyeztetési pontok, mit vigyél magaddal (piaci adat, kockázat), és folyamat-kockázatok. Akkor a leghasznosabb, ha a kutatás előtt futtatod: ilyenkor még alakíthatók a feltételek." },
+    { id:"plan", kind:"ai", name:"① Keresési terv", one:"Célpozíciók, célcégek, lekérdezések", isNew:true,
+      where:"Célpiac → ① TERV",
+      what:"Ez adja a kutatás alapját: célpozíciók, célcégek, kulcs-szinonimák, boolean/X-ray és webes lekérdezések. Minden kategória szerkeszthető — hozzáadhatsz és elvehetsz.",
+      why:"Az AI-terv nem végleges kimenet, hanem közös munkadarab. A frissítés egyesít, nem töröl: a kézzel felvett elemeid megmaradnak, és amit kézzel kivettél, azt az újragenerálás nem hozza vissza csendben." },
+    { id:"map", kind:"ai", name:"② Célpiac-térkép", one:"Hol dolgoznak ezek az emberek",
+      where:"Célpiac → ② TÉRKÉP",
+      what:"Célcégek indoklással és valószínű szerepekkel, versenytárs-klaszterek, és hol találkoznak: közösségek, konferenciák. A keresési terv után élesedik, mert abból dolgozik, és ez adja a célcég-lefedettség alapját." },
+    { id:"excl", kind:"szabaly", name:"Kizárás a merítésből", one:"Az ügyfél saját emberei kimaradnak", isNew:true,
+      where:"Célpiac → jobb hasáb",
+      what:"Az ügyfél jelenlegi és volt munkatársai automatikusan kimaradnak; a cégnév-egyezés a rövidített és leányvállalati alakokat is felismeri. Felvehetsz további off-limits cégeket, az alumnikat pedig egy kapcsolóval visszaengedheted.",
+      why:"A kizárás nem törlés. A találat megmarad indoklással, külön sávon, és egy kattintással visszahozható — mert a néma törlés is bizalomvesztés. A szabály maga viszont kemény: ha az ügyfél saját embere kerül a listára, az az egész merítés hitelét viszi." },
+    { id:"chat", kind:"ai", name:"Stratégia-asszisztens", one:"Szűk hatókörű, visszavonható szerkesztés", isNew:true,
+      where:"Célpiac → alul",
+      what:"Szövegesen mondod meg, mit változtasson a keresési terven vagy a célpiac-térképen. Ha utasítasz, végrehajtja; ha kérdezel, javaslatokat ad, amiket egyenként alkalmazol. Minden módosítás tételes és visszavonható.",
+      why:"Ez nem általános asszisztens: kizárólag a tervhez és a térképhez nyúlhat, jelöltet nem értékel és üzenetet nem ír. A rendszer-promptja megnyitható a felületen, hogy látszódjon, mit tud és mit nem — a szűk hatókör az, ami ellenőrizhetővé teszi." },
+    { id:"disc", kind:"adat", name:"③ Jelöltkutatás", one:"Publikus web → jelölt-rekordok", isNew:true,
+      where:"Célpiac → ③ KUTATÁS",
+      what:"A terv webes lekérdezéseivel keres a nyilvános weben, a ténylegesen elérhető oldalakat mélyebben kiolvassa, és normalizált jelölt-rekordokká alakítja — jelekkel, forrás-hivatkozással és GDPR-státusszal. Az ismételt futtatás nem írja felül a listát: hozzáad, „Új” jelöléssel.",
+      whyKind:"coral",
+      whyLabel:"Tudatos korlát",
+      why:"Nincs belépett vagy fake-account LinkedIn-scraping. A LinkedIn-találatok a keresőből jönnek, a profil-oldal auth-fal mögött van, így onnan csak a kereső-snippet marad. A valódi mélységet a scrapelhető publikus források adják: GitHub, cég-oldalak, konferencia-biók, blogok — és ezt a felület nem takarja el." },
+  ]},
+
+  { n:"2 · Merítés és megkeresés", h:"Kivel beszélünk", q:"A találati listától az elküldött megkeresésig és a rögzített válaszig.", steps:[
+    { id:"cov", kind:"szabaly", name:"Keresési lefedettség", one:"Egyoldalú-e a merítés?", isNew:true,
+      where:"Áttekintés → jobb hasáb",
+      what:"Két kérdésre válaszol: egy forrásból jön-e szinte minden jelölt (70% fölött vakfolt), és hány célcég maradt érintetlenül. Ha valamelyik hibázik, figyelmeztet, mielőtt a listából következtetnél.",
+      why:"A merítés minőségét a legtöbb eszköz nem méri, csak a darabszámot. Egy 40 fős lista egyetlen forrásból kevesebbet ér, mint egy 15 fős négyből — ezt itt látod, nem utólag." },
+    { id:"rank", kind:"ai", name:"Prioritási javaslat", one:"A / B / C / D, indoklással", isNew:true,
+      where:"Jelöltek",
+      what:"A — elsőként keresd meg, B — következő kör, C — figyelőlista, D — most nem javasolt. A prioritást bármikor felülírhatod, és a te beállításod győz.",
+      why:"Kimondja, ha valaki nem fit. A legtöbb eszköz csak pozitív listát ad, és a gyenge jelölt némán eltűnik — itt nem esik ki senki, csak megkapja a D-t indoklással. Ez teszi a listát elszámoltathatóvá." },
+    { id:"board", kind:"ember", name:"Jelölt-tábla", one:"Öt oszlop = a folyamat öt állapota",
+      where:"Jelöltek",
+      what:"Rangsorolatlan → Előkészítés → Jóváhagyás és küldés → Kiküldve → Válaszolt. Egy jelölt mindig pontosan egy oszlopban van, a kártya alján ott a következő lépése. Alatta a Figyelőlista (C/D) és a Kizárva sáv.",
+      why:"Korábban a megkeresés külön képernyőn élt, ezért ugyanaz a jelölt két helyen létezett, eltérő sorrenddel. Egy létra, egy hely." },
+    { id:"profile", kind:"ai", name:"Profil összegzése", one:"Őszinte illeszkedés-ítélet",
+      where:"Jelöltpanel → Profil",
+      what:"Erős / közepes / gyenge / nem fit — indoklással, a jelekre építve, plusz egy lista arról, amit a jelekből nem tudunk. A „nem fit” nem automatikus elutasítás: a döntés a tiéd." },
+    { id:"attract", kind:"ai", name:"Megközelítési terv", one:"Tény és feltételezés szétválasztva", isNew:true,
+      where:"Jelöltpanel → Megközelítés",
+      what:"Két élesen elválasztott rész. „Amit tudunk”: csak a jelekből visszavezethető tény, mindegyik mellett a jel, amiből ered. „Megközelítési javaslat”: pontosan 3 ötlet rangsorolva, nyíltan feltételezésként jelölve — a legerősebb nyitómondat-javaslattal, kettő röviden.",
+      why:"Ez a termék lényege. A jelölt motivációját nem ismerjük, tehát a megközelítés hipotézis — a rendszer ezt kimondja, nem elrejti. Egy guardrail utólag kiszűri azokat az állításokat, amiket nem lehet a jelölt egyetlen jelére sem visszavezetni, és jelzi, hányat dobott." },
+    { id:"msg", kind:"ember", name:"Üzenetvázlat és kiküldés", one:"A rendszer sosem küld", isNew:true,
+      where:"Jelöltpanel → Üzenet",
+      what:"A megközelítési tervből személyre szabott vázlat készül, aminek az első mondata a jelölt saját munkájához kapcsolódik. Szerkeszted, jóváhagyod, kimásolod. Az állapotok — jóváhagyva, kiküldve, válasz (pozitív / semleges / negatív) — a te rögzítéseid.",
+      whyKind:"coral", whyLabel:"Termékdöntés",
+      why:"A rendszer soha nem küld semmit: a kiküldés a te csatornádon (e-mail, LinkedIn) történik. Ez nem korlát, hanem szándék — az automatizált kiküldés az, ami tömegessé és megkülönböztethetetlenné teszi a megkereséseket." },
+    { id:"art14", kind:"jog", name:"GDPR Art. 14 értesítő", one:"Kötelező tájékoztatás sablonja",
+      where:"Jelöltpanel → Üzenet → alul",
+      what:"Publikus forrásból kutatva adatkezelővé válsz, és a 14. cikk szerint tájékoztatnod kell az érintettet: ki az adatkezelő, milyen adat, honnan, milyen célból, milyen jogalapon, milyen jogokkal. A jelölt profilján a státusz mutatja, hol tartasz.",
+      whyKind:"coral", whyLabel:"Fontos",
+      why:"Sablon, nem jogi tanács. A cégadatokat és a dokumentált érdekmérlegelést ki kell tölteni, és skálázás előtt jogásszal átnézetni. A határidő a megszerzéstől számított 1 hónap, vagy az első kapcsolatfelvétel — amelyik hamarabb jön." },
+    { id:"notes", kind:"ai", name:"Napló és módszertani segítség", one:"Jegyzetek + következő lépés javaslat",
+      where:"Bármelyik képernyőről (⌘J)",
+      what:"Megbízás- és jelöltszintű jegyzetek, plusz a jelölt idővonala, ami a meglévő eseményekből áll össze. A „Módszertani segítség” egy javasolt megközelítést, egy azonnal bevethető lépést és egy készség-fókuszt ad arra, amit leírsz." },
+    { id:"iv", kind:"ai", name:"Interjúterv", one:"Az első pozitív válasz oldja fel",
+      where:"Interjúterv",
+      what:"Kompetencia-alapú kérdések: mit kérdezz, és mit jelez egy erős válasz, plusz a beszélgetésen tisztázandó jelek.",
+      why:"Az első pozitív válaszig zárolva van — a negatív és a semleges nem oldja fel. Amíg nincs pozitív válasz, nem tudni, kivel készül az interjú, tehát a terv találgatás lenne. A zárolás elmagyarázza, mire vár, ahelyett hogy üres képernyőt adna." },
+  ]},
+
+  { n:"3 · Lezárás", h:"Mit hozott", q:"Mérhető eredmény a saját korábbi számaidhoz képest.", steps:[
+    { id:"res", kind:"ember", name:"Eredmények", one:"Válaszarány és pozitív arány külön", isNew:true,
+      where:"Eredmények",
+      what:"Kiküldött megkeresések, válaszadási arány és pozitív válaszok aránya, a korábbi kézi válaszarányodhoz mérve. Plusz az első shortlistig eltelt idő és a folyamatban lévő A/B jelöltek száma.",
+      why:"A „válaszolt” önmagában félrevezető, mert az elutasítás is válasz — ezért külön mutató a pozitív arány. Minden szám a te rögzítéseidből épül: a rendszer nem küld, tehát kitalált számot sem mutat." },
+    { id:"data", kind:"szabaly", name:"Tárolás, export, módjelzők", one:"A munkád a böngésződben él",
+      where:"Oldalsáv és fejléc",
+      what:"A felület mindig mutatja, milyen módban futsz: AI elérhető vagy Bemutató mód, élő webes források vagy mintaadatok — bemutató módban a kimeneteken MINTA címke van. A megbízásaid ebben a böngészőben tárolódnak (a szerver állapotmentes), ezért a fontos munkát exportáld: a fejléc Export gombja teljes JSON-t ad." },
+  ]},
+];
+
+const LADDER = [
+  ["Rangsorolatlan",""],["Előkészítés",""],["Jóváhagyás és küldés",""],["Kiküldve",""],["Válaszolt",""],
+  ["Figyelőlista — C/D","side"],["Kizárva a merítésből","out"],
+];
+
+const byId = {};
+PHASES.forEach(p => p.steps.forEach(s => (byId[s.id] = s)));
+
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+document.getElementById("flow").innerHTML = PHASES.map((p, pi) => `
+  <section class="phase">
+    <div class="phase-head"><span class="phase-n">${esc(p.n)}</span><h2 class="phase-h">${esc(p.h)}</h2></div>
+    <p class="phase-q">${esc(p.q)}</p>
+    <div class="flow">
+      ${p.steps.map((s, i) => `
+        ${i ? '<span class="arrow" aria-hidden="true">→</span>' : ""}
+        <button class="node k-${s.kind}" data-id="${esc(s.id)}">
+          <span class="n-kind">${esc(KIND[s.kind])}</span>
+          <span class="n-name">${esc(s.name)}${s.isNew ? '<span class="new-dot" title="Ez az, amit máshol nem találsz"></span>' : ""}</span>
+          <span class="n-one">${esc(s.one)}</span>
+        </button>`).join("")}
+    </div>
+    ${pi === 1 ? `<div class="gate"><b>Függés:</b> a célpiac-térképhez és a jelöltkutatáshoz keresési terv kell, a keresési tervhez pedig véglegesített brief. Minden más szabadon sorrendezhető.</div>` : ""}
+    ${pi === 2 ? `<div class="gate"><b>Kapu:</b> az Interjúterv az első <b>pozitív</b> válaszig zárva marad. A negatív és a semleges válasz nem oldja fel.</div>
+      <div class="ladder"><span class="lad-l">A jelölt állapot-létrája — egy jelölt mindig pontosan egy állapotban van</span>
+      ${LADDER.map(([l,c],i)=>`${i&&i<5?'<span class="arrow" aria-hidden="true">→</span>':""}<span class="lad ${c}">${esc(l)}</span>`).join("")}</div>` : ""}
+  </section>`).join("");
+
+function show(id){
+  const s = byId[id];
+  if (!s) return;
+  document.querySelectorAll(".node").forEach(n => n.classList.toggle("on", n.dataset.id === id));
+  document.getElementById("detailBody").innerHTML = `
+    <div class="d-top">
+      <div class="d-kind">${esc(KIND[s.kind])}</div>
+      <h3 class="d-title">${esc(s.name)}</h3>
+      <div class="d-where">Hol találod: ${esc(s.where)}</div>
+    </div>
+    <div class="d-body">
+      <p>${esc(s.what)}</p>
+      ${s.why ? `<div class="d-why ${s.whyKind === "coral" ? "coral" : ""}">
+        <div class="d-why-l">${esc(s.whyLabel || "Miért így")}</div><p>${esc(s.why)}</p></div>` : ""}
+    </div>`;
+  document.getElementById("detail").style.display = "";
+}
+
+document.addEventListener("click", (e) => {
+  const b = e.target.closest(".node");
+  if (b) return show(b.dataset.id);
+  if (e.target.id === "dClose" && matchMedia("(max-width:1080px)").matches) {
+    document.getElementById("detail").style.display = "none";
+    document.querySelectorAll(".node").forEach(n => n.classList.remove("on"));
+  }
+});
+
+// Széles képernyőn induljon nyitva egy magyarázat; keskenyen csak kattintásra.
+if (matchMedia("(max-width:1080px)").matches) {
+  document.getElementById("detail").style.display = "none";
+  document.getElementById("detailBody").innerHTML = `<div class="d-hint">Koppints bármelyik lépésre a magyarázatért.</div>`;
+} else {
+  show("final");
+}
+</script>
+</body>
+</html>
