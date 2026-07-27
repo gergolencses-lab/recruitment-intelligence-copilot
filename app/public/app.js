@@ -57,6 +57,7 @@ function migrate(p) {
   if (!p.assessments) p.assessments = {};
   if (!p.coach_notes) p.coach_notes = [];
   if (!p.memory) p.memory = [];
+  if (p.archived === undefined) p.archived = false;
   // Régi build: a ranking csupasz tömbként mentődött (guard-mellékhatás) — normalizáljuk.
   if (Array.isArray(p.ranking)) p.ranking = { ranked: p.ranking };
   return p;
@@ -67,14 +68,58 @@ function lsSave(p) {
   const all = lsAll();
   p.updated_at = new Date().toISOString();
   all[p.id] = p;
-  try { localStorage.setItem(LS_KEY, JSON.stringify(all)); } catch (e) { toast("A böngésző tárhelye megtelt — törölj régi megbízást."); }
+  try { localStorage.setItem(LS_KEY, JSON.stringify(all)); }
+  catch (e) { toast("A böngésző tárhelye megtelt. Archiválj vagy törölj régi megbízást a nyitóképernyőn.", true); }
   return p;
 }
 function lsGet(id) { return lsAll()[id] || null; }
+function lsDelete(id) {
+  const all = lsAll();
+  const removed = all[id];
+  delete all[id];
+  try { localStorage.setItem(LS_KEY, JSON.stringify(all)); } catch {}
+  return removed;
+}
+// A törlés visszavonható: a kivett megbízást memóriában tartjuk, amíg a
+// visszavonó buborék él. Enélkül a törlés az egyetlen visszafordíthatatlan
+// művelet lenne egy termékben, ami mindenhol máshol megőrzi a nyomot.
+function lsRestore(p) { if (p && p.id) { const all = lsAll(); all[p.id] = p; try { localStorage.setItem(LS_KEY, JSON.stringify(all)); } catch {} } }
 function lsListFull() { return Object.values(lsAll()).sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || "")); }
 function persist() { if (state.project) lsSave(state.project); }
-function saveUi() { try { localStorage.setItem(UI_KEY, JSON.stringify({ projectId: state.projectId, view: state.view, homeFilter: state.homeFilter, candView: state.candView })); } catch {} }
+function saveUi() { try { localStorage.setItem(UI_KEY, JSON.stringify({ projectId: state.projectId, view: state.view, homeFilter: state.homeFilter, candView: state.candView })); } catch {} syncHash(); }
 function loadUi() { try { return JSON.parse(localStorage.getItem(UI_KEY) || "{}"); } catch { return {}; } }
+
+/* ── CÍMSOR-ÁLLAPOT ──────────────────────────────────────────────────────
+   Eddig minden navigáció `href="#"` volt: egy megbízást nem lehetett
+   könyvjelzőzni, linkként elküldeni, és a Vissza gomb sem csinált semmit.
+   A hash a megbízás azonosítóját és a nézetet hordozza — a tárolás marad
+   böngésző-lokális, de a hely megosztható és megjegyezhető. */
+let hashLock = false;
+function syncHash() {
+  if (hashLock) return;
+  const want = state.projectId ? `#/m/${encodeURIComponent(state.projectId)}/${state.view}` : "#/";
+  if (location.hash === want) return;
+  hashLock = true;
+  try { history.replaceState(history.state, "", want); } finally { hashLock = false; }
+}
+function parseHash() {
+  const m = /^#\/m\/([^/]+)(?:\/([a-z]+))?/.exec(location.hash || "");
+  return m ? { id: decodeURIComponent(m[1]), view: m[2] || "attekintes" } : null;
+}
+// Két fül ugyanazon az origin-en eddig némán felülírta egymást. Nem oldjuk
+// fel az ütközést automatikusan — megmondjuk, hogy megtörtént.
+function watchExternalWrites() {
+  window.addEventListener("storage", (e) => {
+    if (e.key !== LS_KEY || !state.projectId) return;
+    const fresh = lsGet(state.projectId);
+    if (!fresh) { toast("Ezt a megbízást egy másik lapon törölték.", true); closeEngagement(); return; }
+    if (fresh.updated_at && state.project && fresh.updated_at > (state.project.updated_at || "")) {
+      toast("Ezt a megbízást egy másik lapon módosították — újratöltve.", true);
+      state.project = fresh;
+      render(state.view);
+    }
+  });
+}
 
 function emptyProjectJS(id, name) {
   return migrate({
@@ -114,40 +159,195 @@ function el(tag, cls, html) {
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
-function toast(msg) {
+// A visszajelzés két csatornán megy: a látható buborék, és — mert a buborék
+// képernyőolvasóval néma volt — egy élő régió. A hiba a riasztó régióba megy.
+function announce(msg, isError) {
+  const n = $(isError ? "#srAlert" : "#srLive");
+  if (!n) return;
+  n.textContent = "";
+  setTimeout(() => { n.textContent = msg; }, 30);
+}
+function toast(msg, isError) {
   const t = $("#toast");
   t.textContent = msg;
+  t.classList.toggle("toast-err", !!isError);
   t.classList.remove("hidden");
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => t.classList.add("hidden"), 2600);
+  toast._t = setTimeout(() => t.classList.add("hidden"), isError ? 5200 : 2600);
+  announce(msg, isError);
 }
-async function api(method, path, body) {
+
+/* ── HIBAKEZELÉS ─────────────────────────────────────────────────────────
+   A korábbi működés minden hibát egy 2,6 másodperces buborékba tett a nyers
+   üzenettel („Hiba: HTTP 504"). Egy hatvan másodperces, elbukott művelet így
+   nyomtalanul tűnt el: a képernyő pixelre ugyanaz maradt, mint kattintás
+   előtt, tehát a hibát nem lehetett megkülönböztetni attól, hogy a felhasználó
+   el sem indította. Ezért a hiba mostantól ODA kerül, ahol az eredményt
+   vártuk, ott is marad, magyarul mondja meg az okot, és felkínálja a
+   kijáratot — 504-nél azt, amit a README is javasol: mintaadatok. */
+const TASK_TIMEOUT_MS = 55000;   // a Vercel-függvény 60 mp-es plafonja alatt
+
+function apiError(status, msg) {
+  const e = new Error(msg || `HTTP ${status}`);
+  e.status = status;
+  return e;
+}
+// Státuszkód → magyar ok + a belőle következő kijárat.
+function errorInfo(e) {
+  const st = e && e.status;
+  if (e && e.name === "AbortError") {
+    return e._userCancelled
+      ? { title: "Megszakítva", detail: "A műveletet te állítottad le. Bármikor újraindíthatod.", retry: "Újraindítom" }
+      : { title: "A művelet túllépte az időkorlátot",
+          detail: "A kiszolgáló 60 másodpercnél tovább dolgozott volna. Élő webes kereséssel ez nagy lekérdezés-számnál előfordul.",
+          retry: "Újrapróbálom", hint: "timeout" };
+  }
+  if (st === 504 || st === 408) {
+    return { title: "A keresés túllépte a 60 másodperces korlátot",
+      detail: "Az élő webes kutatás nem fejeződött be időben. A mintaadatok azonnal futnak, és ugyanezt a folyamatot végigjátsszák.",
+      retry: "Újrapróbálom", hint: "timeout" };
+  }
+  if (st === 429) {
+    return { title: "Elérted az óránkénti korlátot",
+      detail: "Túl sok művelet indult rövid időn belül erről a hálózatról. Várj néhány percet, aztán folytasd.", retry: "Újrapróbálom" };
+  }
+  if (st === 401 || st === 403) {
+    return { title: "A kiszolgáló elutasította a kérést",
+      detail: "Az AI-kulcs hiányzik vagy lejárt. A mintaadatokkal a folyamat kulcs nélkül is végigjátszható.", hint: "timeout" };
+  }
+  if (st >= 500) {
+    return { title: "A kiszolgáló hibát adott",
+      detail: `A művelet nem fejeződött be (${st}). Ez általában átmeneti — próbáld újra.`, retry: "Újrapróbálom" };
+  }
+  if (st >= 400) {
+    return { title: "A kérést nem lehetett feldolgozni", detail: e.message || `A kiszolgáló ${st} hibát adott.`, retry: "Újrapróbálom" };
+  }
+  // fetch-szintű bukás: hálózat vagy DNS
+  return { title: "Nincs kapcsolat a kiszolgálóval",
+    detail: "Ellenőrizd az internetkapcsolatot. A már elmentett megbízások offline is olvashatók.", retry: "Újrapróbálom" };
+}
+
+async function api(method, path, body, opts) {
+  opts = opts || {};
   if (method === "POST" && /^\/api\/project\/[^/]/.test(path) && state.project) {
     body = { ...(body || {}), project: state.project };
   }
-  const res = await fetch(path, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: opts.signal,
+    });
+  } catch (e) {
+    if (e && e.name === "AbortError") throw e;
+    throw new Error("network");        // errorInfo ebből ad hálózati üzenetet
+  }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok) throw apiError(res.status, data.error);
   return data;
 }
-async function withLoading(btn, fn) {
-  if (!btn) return fn();
-  btn.classList.add("loading");
-  btn.disabled = true;
+
+/* ── VÁRAKOZÁS ───────────────────────────────────────────────────────────
+   Egy 20–60 másodperces művelet korábban egyetlen 14px-es spinnert kapott egy
+   gombon, aminek közben a felirata is eltűnt. A cél-panel eközben végig a
+   régi üres állapotot mutatta. Most a várakozás oda kerül, ahol az eredmény
+   lesz, a márkajel geometriájával: szűkülő sávok futnak a korall pontba. */
+const SK_BARS = [11, 9, 7, 5];
+function skeletonHtml(label, id) {
+  return `<div class="task" id="${id}">
+    <div class="task-head">
+      <span class="task-label">${esc(label)}</span>
+      <span class="task-time" id="${id}-t" aria-hidden="true"></span>
+      <button class="btn btn-ghost task-cancel" id="${id}-c">Megszakítás</button>
+    </div>
+    <div class="task-funnel" aria-hidden="true">${SK_BARS.map((h, i) =>
+      `<span class="task-bar" style="height:${h}px;animation-delay:${i * 0.16}s"></span>`).join("")}<span class="task-dot"></span></div>
+    <div class="task-note" id="${id}-n">Ez 20–60 másodpercig tarthat.</div>
+  </div>`;
+}
+function errorCardHtml(info, id, altLabel) {
+  return `<div class="task task-error" id="${id}" role="group" aria-label="Hiba">
+    <div class="task-head"><span class="task-label">${esc(info.title)}</span></div>
+    <p class="task-note">${esc(info.detail)}</p>
+    <div class="row task-acts">
+      ${info.retry ? `<button class="btn btn-primary" id="${id}-r">${esc(info.retry)}</button>` : ""}
+      ${altLabel ? `<button class="btn" id="${id}-a">${esc(altLabel)}</button>` : ""}
+    </div>
+  </div>`;
+}
+
+let taskSeq = 0;
+/* withLoading(btn, fn) — a régi, rövid műveletekre változatlan szerződéssel.
+   Az opts megadásával a hosszú műveletek megkapják a teljes kezelést:
+   skeleton a cél-panelben, eltelt idő, megszakítás, és tartós hibakártya
+   retry / alternatíva gombbal.
+     opts.into      — a cél-panel szelektora (ide megy a skeleton és a hiba)
+     opts.label     — mit csinál éppen, sima magyarul
+     opts.alt       — { label, run } második kijárat (pl. váltás mintaadatokra) */
+async function withLoading(btn, fn, opts) {
+  opts = opts || {};
+  const into = opts.into ? $(opts.into) : null;
+  const id = "task" + ++taskSeq;
+  const ctrl = new AbortController();
+  let t0 = Date.now(), tick = null, timeout = null;
+
+  const cleanup = () => {
+    clearInterval(tick); clearTimeout(timeout);
+    if (btn) { btn.classList.remove("loading"); btn.disabled = false; }
+  };
+  if (btn) { btn.classList.add("loading"); btn.disabled = true; }
+  if (into) {
+    into.innerHTML = skeletonHtml(opts.label || "Feldolgozás…", id);
+    announce((opts.label || "Feldolgozás") + " — folyamatban.");
+    const c = $("#" + id + "-c");
+    if (c) c.onclick = () => { ctrl._userCancelled = true; ctrl.abort(); };
+    // Az eltelt idő csak 5 másodperc után jelenik meg: rövid műveletnél
+    // a számláló maga is zaj lenne.
+    tick = setInterval(() => {
+      const s = Math.round((Date.now() - t0) / 1000);
+      const el2 = $("#" + id + "-t");
+      if (el2 && s >= 5) el2.textContent = s + " mp";
+      const n = $("#" + id + "-n");
+      if (n && s >= 30) n.textContent = "Még dolgozik — az élő webes keresés a leglassabb lépés.";
+    }, 1000);
+  }
+  timeout = setTimeout(() => ctrl.abort(), TASK_TIMEOUT_MS);
+
   try {
-    return await fn();
+    const r = await fn(ctrl.signal);
+    cleanup();
+    // Ha a hívó nem írta felül a cél-panelt (mert pl. másik nézetre lépett),
+    // a saját skeletonunkat magunk takarítjuk el — különben a visszatérő
+    // felhasználó egy örökké „folyamatban" állapotot találna ott.
+    const left = $("#" + id);
+    if (left && left.classList.contains("task")) left.remove();
+    return r;
   } catch (e) {
-    toast("Hiba: " + e.message);
+    cleanup();
+    if (ctrl._userCancelled && e && e.name === "AbortError") e._userCancelled = true;
+    const info = errorInfo(e);
+    if (into) {
+      const alt = opts.alt && info.hint === "timeout" ? opts.alt : null;
+      into.innerHTML = errorCardHtml(info, id, alt ? alt.label : null);
+      const r = $("#" + id + "-r");
+      if (r && opts.retry) r.onclick = () => opts.retry();
+      else if (r) r.onclick = () => { if (btn) btn.click(); };
+      const a = $("#" + id + "-a");
+      if (a && alt) a.onclick = () => alt.run();
+      announce(info.title + " " + info.detail, true);
+    } else {
+      toast(info.title, true);
+    }
     throw e;
-  } finally {
-    btn.classList.remove("loading");
-    btn.disabled = false;
   }
 }
+// A hosszú műveletek egy helyen kapják meg a védelmet: a kattintáskori
+// megbízás-azonosítót elmentjük, és a válasz csak akkor íródik be, ha még
+// ugyanaz a megbízás van nyitva. Enélkül egy közben elnavigáló felhasználó
+// eredménye némán elveszett — miközben lefutott egy „kész" visszajelzés.
+function stillOn(pid) { return state.project && state.project.id === pid; }
 function demoTag(o) {
   return o && (o._demo || o._mode === "demo") ? '<span class="demo-tag">MINTA</span>' : "";
 }
@@ -156,13 +356,39 @@ function aiTag(reviewed) {
     ? '<span class="ai-status ok">Recruiter által jóváhagyva</span>'
     : '<span class="ai-status">AI-javaslat — még nincs ellenőrizve</span>';
 }
+/* ── EVIDENCIA-EREDET ────────────────────────────────────────────────────
+   A termék tézise, hogy egy állítás mögött mi áll: forrás, következtetés vagy
+   feltételezés. Ez eddig három majdnem egyforma pasztell pirulaként jelent
+   meg — a legfontosabb megkülönböztetés volt a legkevésbé látható.
+   Mostantól a FORMA hordozza a bizonyosságot, nem csak a szín: a tömör sáv
+   igazolt, a körvonal következtetés, a szaggatott körvonal feltételezés.
+   Ugyanaz a logika, mint a tölcséré — ahogy csökken a biztos, úgy fogy az
+   anyag is. Színvakon és fekete-fehér nyomtatásban is olvasható marad. */
+const EV_KINDS = {
+  fact: { label: "Forrással igazolt", short: "igazolt" },
+  inference: { label: "Következtetés", short: "következtetés" },
+  assume: { label: "Ellenőrizendő feltételezés", short: "feltételezés" },
+};
+function evTag(kind, textOverride) {
+  const k = EV_KINDS[kind] ? kind : "assume";
+  return `<span class="ev-tag ev-${k}"><span class="ev-mark" aria-hidden="true"></span>${esc(textOverride || EV_KINDS[k].label)}</span>`;
+}
 function needEngagement() {
   if (!state.projectId) { toast("Nyiss meg egy megbízást."); return false; }
   return true;
 }
 function daysSince(iso) { if (!iso) return null; const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000); return isNaN(d) ? null : d; }
+// A „ma / tegnap" naptári nap, nem 24 óra. A nyers ms-különbség floor-olása
+// miatt egy 23:50-kor mentett bejegyzés 00:10-kor még „tegnap"-ot mutatott.
+function midnight(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); }
+function calDaysSince(iso) {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return null;
+  return Math.round((midnight(Date.now()) - midnight(t)) / 86400000);
+}
 function relTime(iso) {
-  const d = daysSince(iso);
+  const d = calDaysSince(iso);
   if (d == null) return "—";
   if (d <= 0) return "ma";
   if (d === 1) return "tegnap";
@@ -179,10 +405,13 @@ function tierLetter(t) { const s = String(t || ""); return s.startsWith("A") ? "
 function chipEditor(id, items, opts) {
   opts = opts || {};
   const label = (v) => (v && typeof v === "object" ? (v.name || v.query || "") : String(v == null ? "" : v));
+  // Az „Eltávolítás" gomb korábban minden chipen ugyanazt a nevet viselte:
+  // képernyőolvasóval N egyforma gomb, kontextus nélkül.
   const body = (items || []).map((v, i) =>
-    `<span class="ed-chip ${opts.cls || ""}">${esc(label(v))}<button class="ed-x" data-i="${i}" title="Eltávolítás" aria-label="Eltávolítás">×</button></span>`).join("");
+    `<span class="ed-chip ${opts.cls || ""}">${esc(label(v))}<button class="ed-x" data-i="${i}" title="Eltávolítás: ${esc(label(v))}" aria-label="Eltávolítás: ${esc(label(v))}">×</button></span>`).join("");
+  const ph = opts.placeholder || "Új elem… (vesszővel több is)";
   return `<div class="ed-list" id="${id}">${body || `<span class="ed-empty">${esc(opts.empty || "— még üres —")}</span>`}
-    <span class="ed-add"><input class="ed-in" placeholder="${esc(opts.placeholder || "Új elem… (vesszővel több is)")}" aria-label="${esc(opts.placeholder || "Új elem")}" /><button class="btn ed-plus" title="Hozzáadás">+</button></span></div>`;
+    <span class="ed-add"><input class="ed-in" placeholder="${esc(ph)}" aria-label="${esc(ph)}" /><button class="btn ed-plus" title="Hozzáadás" aria-label="Hozzáadás: ${esc(ph)}">+</button></span></div>`;
 }
 // onAdd: string[] · onRemove: index. A hívó a végén újrarendereli a nézetet.
 function wireChipEditor(id, onAdd, onRemove) {
@@ -460,10 +689,11 @@ function needsAttention(p) {
 async function loadStatus() {
   const s = await api("GET", "/api/status");
   state.status = s;
-  const live = `<span class="badge ${s.brain ? "badge-live" : "badge-demo"}">${s.brain ? "🟢 AI elérhető" : "🟡 Bemutató mód"}</span>`;
-  const src = `<span class="badge ${s.reach_live ? "badge-live" : "badge-demo"}">${s.reach_live ? "🟢 Nyilvános webes források" : "🟡 Mintaadatok"}</span>`;
+  // Egy helyen él: korábban ugyanez a két jelvény egyszerre látszott az
+  // oldalsáv alján és a felső sávban, egymástól ezer pixelre.
+  const live = `<span class="badge ${s.brain ? "badge-live" : "badge-demo"}">${s.brain ? "AI elérhető" : "Bemutató mód"}</span>`;
+  const src = `<span class="badge ${s.reach_live ? "badge-live" : "badge-demo"}">${s.reach_live ? "Nyilvános webes források" : "Mintaadatok"}</span>`;
   $("#badges").innerHTML = live + src;
-  $("#badgesTop").innerHTML = live + src;
   $("#modelLine").textContent = `modell: ${s.model} · ${s.knowledge_version}`;
   const sel = $("#sourceSel");
   if (sel && !s.reach_live) sel.value = "synthetic";
@@ -574,9 +804,11 @@ function renderSubNav() {
   const show = !!state.project && !!f && f.views.length > 1 && state.view !== "jeloltek";
   box.classList.toggle("hidden", !show);
   if (!show) { box.innerHTML = ""; return; }
+  // Ez navigáció, nem fülsáv: a role="tablist" panelek nélkül olyasmit ígért
+  // a képernyőolvasónak, ami nem létezett. Nézetváltás → aria-current.
   const gate = !hasPositiveReply(state.project);
   box.innerHTML = `<span class="subnav-lbl">${esc(f.label)}</span>` + f.views.map(([v, lbl]) =>
-    `<button class="subnav-b${v === state.view ? " on" : ""}${v === "interju" && gate ? " locked" : ""}" data-view="${v}" role="tab" aria-selected="${v === state.view}">${esc(lbl)}</button>`).join("");
+    `<button class="subnav-b${v === state.view ? " on" : ""}${v === "interju" && gate ? " locked" : ""}" data-view="${v}" aria-current="${v === state.view ? "page" : "false"}">${esc(lbl)}</button>`).join("");
 }
 function toggleMoreSheet() { state.moreOpen ? closeMoreSheet() : openMoreSheet(); }
 function closeMoreSheet() {
@@ -597,7 +829,7 @@ function openMoreSheet() {
     <button class="sheet-row" data-view="interju"><b>Interjúterv</b><span>Kompetencia-alapú kérdések</span></button>
     <div class="sheet-sec">
       <label class="cov-label">Státusz</label>
-      <select id="msStatus">${STATUSES.map((s) => `<option ${p.status === s ? "selected" : ""}>${s}</option>`).join("")}</select>
+      <select id="msStatus" aria-label="Megbízás státusza">${STATUSES.map((s) => `<option ${p.status === s ? "selected" : ""}>${s}</option>`).join("")}</select>
     </div>
     <div class="sheet-row-inline">
       <button class="btn" id="msExport">Export</button>
@@ -654,16 +886,19 @@ function closeEngagement() {
   state.project = null;
   closeDrawer();
   closeNotesDrawer();
+  const te = $("#topEng"); if (te) te.innerHTML = "";
   showView("home");
 }
 
 // ── MEGBÍZÁSOK NYITÓKÉPERNYŐ ────────────────────────────────────────────
 const HOME_FILTERS = [
-  ["aktiv", "Aktív"], ["figyelem", "Figyelmet igényel"], ["varakozik", "Várakozik"], ["lezart", "Lezárt"], ["mind", "Mind"],
+  ["aktiv", "Aktív"], ["figyelem", "Figyelmet igényel"], ["varakozik", "Várakozik"], ["lezart", "Lezárt"], ["archivalt", "Archivált"], ["mind", "Mind"],
 ];
 function homeFilterFn(key) {
   return (p) => {
     const closed = p.status === "Betöltve" || p.status === "Lezárva";
+    if (key === "archivalt") return !!p.archived;
+    if (p.archived) return key === "mind";      // az archivált csak a „Mind"-ben és a saját szűrőjében jön elő
     if (key === "aktiv") return !closed;
     if (key === "figyelem") return !closed && needsAttention(p);
     if (key === "varakozik") return p.status === "Várakozik az ügyfélre" || p.status === "Szüneteltetve";
@@ -673,17 +908,25 @@ function homeFilterFn(key) {
 }
 function renderHome() {
   const all = lsListFull();
-  $("#engFilters").innerHTML = HOME_FILTERS.map(([k, lbl]) =>
-    `<button class="filter-pill ${state.homeFilter === k ? "active" : ""}" data-f="${k}">${lbl}</button>`).join("");
-  $$("#engFilters .filter-pill").forEach((b) => (b.onclick = () => { state.homeFilter = b.dataset.f; saveUi(); renderHome(); }));
-
   const listEl = $("#engList");
+  // Nulla megbízásnál eddig öt szűrőpirula renderelődött a „Még nincs
+  // megbízás" kártya fölé — öt szűrő, ami semmit sem szűr —, és az űrlap
+  // megnyitása után is ott maradt az üres állapot saját, immár értelmetlen
+  // „Új megbízás" gombja. Egyszerre egy hívás legyen a képernyőn.
   if (!all.length) {
-    listEl.innerHTML = `<div class="eng-empty"><h3>Még nincs megbízás</h3><p>Egy megbízás = egy ügyfél egy konkrét pozíciója.</p><button class="btn btn-primary" id="emptyNewBtn">Új megbízás</button></div>`;
-    const b = $("#emptyNewBtn"); if (b) b.onclick = () => openNewEngForm();
+    $("#engFilters").innerHTML = "";
     renderNewEngForm();
+    listEl.innerHTML = state.newEngStep ? "" : `<div class="eng-empty"><h3>Még nincs megbízás</h3>
+      <p>Egy megbízás = egy ügyfél egy konkrét pozíciója. A brieftől a shortlistig itt fut végig.</p>
+      <button class="btn btn-primary" id="emptyNewBtn">Első megbízás létrehozása</button></div>`;
+    const b = $("#emptyNewBtn"); if (b) b.onclick = () => openNewEngForm();
     return;
   }
+  const counts = {};
+  HOME_FILTERS.forEach(([k]) => (counts[k] = all.filter(homeFilterFn(k)).length));
+  $("#engFilters").innerHTML = HOME_FILTERS.filter(([k]) => counts[k] || k === state.homeFilter || k === "aktiv" || k === "mind")
+    .map(([k, lbl]) => `<button class="filter-pill ${state.homeFilter === k ? "active" : ""}" data-f="${k}" aria-pressed="${state.homeFilter === k}">${lbl}<span class="pill-n">${counts[k]}</span></button>`).join("");
+  $$("#engFilters .filter-pill").forEach((b) => (b.onclick = () => { state.homeFilter = b.dataset.f; saveUi(); renderHome(); }));
   const filtered = all.filter(homeFilterFn(state.homeFilter));
   listEl.innerHTML = filtered.length ? `<div class="eng-grid">` + filtered.map((p) => {
     const ns = nextStep(p);
@@ -691,10 +934,10 @@ function renderHome() {
     const fi = funnelInfo(p);
     const phaseIdx = PHASES.findIndex((f) => f.views.some(([vv]) => vv === (ns ? ns.view : "")));
     const meta2 = [p.position.location, p.position.work_mode, p.position.owner ? "Felelős: " + p.position.owner : ""].filter(Boolean).join(" · ");
-    return `<div class="eng-card" data-id="${esc(p.id)}">
+    return `<div class="eng-card${p.archived ? " archived" : ""}" data-id="${esc(p.id)}" tabindex="0" role="button" aria-label="${esc(p.position.title || p.name)} megnyitása">
       <div class="eng-card-top">
         <div><div class="eng-title">${esc(p.position.title || p.name)}</div><div class="eng-client">${esc(p.position.client || "—")}</div></div>
-        <span class="status-chip ${STATUS_CLS[p.status] || ""}">${esc(p.status)}</span>
+        <span class="status-chip ${p.archived ? "" : STATUS_CLS[p.status] || ""}">${p.archived ? "archivált" : esc(p.status)}</span>
       </div>
       <div class="pg-mini" title="${fi.felkutatva} felkutatva · ${fi.prioritasos} prioritásos · ${fi.megkeresve} megkeresve · ${fi.valaszolt} válaszolt">
         <span class="ph-dots">${PHASES.map((f, i) => `<span class="ph-dot${i <= phaseIdx ? " on" : ""}"></span>`).join("")}</span>
@@ -709,12 +952,20 @@ function renderHome() {
       </div>
     </div>`;
   }).join("") + `</div>` : `<div class="eng-empty"><h3>Nincs megbízás ebben a szűrőben</h3><p>Válts szűrőt, vagy hozz létre újat.</p></div>`;
-  $$("#engList .eng-card").forEach((r) => (r.onclick = () => openEngagement(r.dataset.id)));
+  $$("#engList .eng-card").forEach((r) => {
+    r.onclick = () => openEngagement(r.dataset.id);
+    r.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openEngagement(r.dataset.id); } };
+  });
   renderNewEngForm();
 }
 
 // Új megbízás — két lépés: 1) alapadatok, 2) brief
-function openNewEngForm() { state.newEngStep = 1; renderNewEngForm(); $("#newEngForm").scrollIntoView({ behavior: "smooth", block: "start" }); }
+function openNewEngForm() {
+  state.newEngStep = 1;
+  renderHome();
+  $("#newEngForm").scrollIntoView({ behavior: "smooth", block: "start" });
+  const f = $("#ne_title"); if (f) f.focus();
+}
 function slugify(s) { return String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
 function renderNewEngForm() {
   const box = $("#newEngForm");
@@ -726,12 +977,12 @@ function renderNewEngForm() {
       <h3>Új megbízás — 1/2 · Alapadatok</h3>
       <div class="step-note">Egy megbízás = egy ügyfél egy konkrét pozíciója.</div>
       <div class="form-grid">
-        <div class="fld"><label>Pozíció neve *</label><input id="ne_title" value="${esc(d.title)}" placeholder="pl. Staff Backend Engineer" /></div>
-        <div class="fld"><label>Ügyfél *</label><input id="ne_client" value="${esc(d.client)}" placeholder="pl. Acme Payments" /></div>
-        <div class="fld"><label>Helyszín</label><input id="ne_location" value="${esc(d.location)}" placeholder="pl. Budapest" /></div>
-        <div class="fld"><label>Munkavégzés</label><select id="ne_work">${WORK_MODES.map((m) => `<option value="${m}" ${d.work_mode === m ? "selected" : ""}>${m || "—"}</option>`).join("")}</select></div>
-        <div class="fld"><label>Tapasztalati szint</label><input id="ne_seniority" value="${esc(d.seniority)}" placeholder="pl. Staff / Senior" /></div>
-        <div class="fld"><label>Felelős recruiter</label><input id="ne_owner" value="${esc(d.owner)}" placeholder="pl. Zita" /></div>
+        <div class="fld"><label for="ne_title">Pozíció neve <abbr title="kötelező">*</abbr></label><input id="ne_title" required aria-required="true" value="${esc(d.title)}" placeholder="pl. Staff Backend Engineer" /></div>
+        <div class="fld"><label for="ne_client">Ügyfél <abbr title="kötelező">*</abbr></label><input id="ne_client" required aria-required="true" value="${esc(d.client)}" placeholder="pl. Acme Payments" /></div>
+        <div class="fld"><label for="ne_location">Helyszín</label><input id="ne_location" value="${esc(d.location)}" placeholder="pl. Budapest" /></div>
+        <div class="fld"><label for="ne_work">Munkavégzés</label><select id="ne_work">${WORK_MODES.map((m) => `<option value="${m}" ${d.work_mode === m ? "selected" : ""}>${m || "—"}</option>`).join("")}</select></div>
+        <div class="fld"><label for="ne_seniority">Tapasztalati szint</label><input id="ne_seniority" value="${esc(d.seniority)}" placeholder="pl. Staff / Senior" /></div>
+        <div class="fld"><label for="ne_owner">Felelős recruiter</label><input id="ne_owner" value="${esc(d.owner)}" placeholder="pl. Zita" /></div>
       </div>
       <div class="row" style="margin-top:14px">
         <button class="btn btn-primary" id="ne_next">Tovább a briefhez</button>
@@ -752,18 +1003,27 @@ function renderNewEngForm() {
       const inp = $("#" + id);
       if (inp) inp.oninput = syncStep1;
     });
+    // A hiányzó kötelező mezőt a mezőnél jelezzük és oda visszük a fókuszt,
+    // nem csak egy elszálló buborékban mondjuk meg.
+    const failField = (id, msg) => {
+      const inp = $("#" + id);
+      if (inp) { inp.classList.add("invalid"); inp.setAttribute("aria-invalid", "true"); inp.focus(); inp.oninput = () => { inp.classList.remove("invalid"); inp.removeAttribute("aria-invalid"); syncStep1(); }; }
+      toast(msg, true);
+    };
     $("#ne_next").onclick = () => {
       syncStep1();
-      if (!d.title) return toast("A pozíció neve kötelező.");
-      if (!d.client) return toast("Az ügyfél neve kötelező.");
+      if (!d.title) return failField("ne_title", "A pozíció neve kötelező.");
+      if (!d.client) return failField("ne_client", "Az ügyfél neve kötelező.");
       state.newEngStep = 2;
       renderNewEngForm();
+      const b2 = $("#ne_brief"); if (b2) b2.focus();
     };
-    $("#ne_cancel").onclick = () => { state.newEngStep = 0; renderNewEngForm._draft = null; renderNewEngForm(); };
+    $("#ne_cancel").onclick = () => { state.newEngStep = 0; renderNewEngForm._draft = null; renderHome(); };
   } else {
     box.innerHTML = `<div class="new-eng">
       <h3>Új megbízás — 2/2 · Brief</h3>
       <div class="step-note">${esc(d.title)} · ${esc(d.client)} — illeszd be a hiring manager nyers briefjét (később is megteheted).</div>
+      <label class="sr-only" for="ne_brief">A hiring manager nyers briefje</label>
       <textarea id="ne_brief" class="brief" placeholder="Illeszd be a nyers briefet ide…">${esc(d.brief)}</textarea>
       <div class="row" style="margin-top:12px">
         <button class="btn btn-primary" id="ne_create">Megbízás létrehozása</button>
@@ -805,18 +1065,29 @@ function renderEngHeader(p) {
   $("#engHeader").innerHTML = `<div class="eng-header">
     <div class="eng-header-top">
       <div>
-        <div class="eng-h-title">${esc(pos.title || p.name)}</div>
+        <h1 class="eng-h-title">${esc(pos.title || p.name)}</h1>
         <div class="eng-h-sub">${esc(sub || "—")}${sub2 ? " · " + esc(sub2) : ""}</div>
       </div>
       <div class="eng-h-actions">
-        <select id="statusSel" title="Státusz módosítása">${STATUSES.map((s) => `<option ${p.status === s ? "selected" : ""}>${s}</option>`).join("")}</select>
-        <button class="btn" id="exportBtn" title="Megbízás exportálása JSON-ban">Export</button>
+        <label class="sr-only" for="statusSel">Megbízás státusza</label>
+        <select id="statusSel">${STATUSES.map((s) => `<option ${p.status === s ? "selected" : ""}>${s}</option>`).join("")}</select>
+        <button class="btn btn-primary" id="exportBtn">Shortlist az ügyfélnek</button>
+        <details class="stepmenu engmenu"><summary aria-label="További műveletek">⋯</summary>
+          <div class="menu-pop">
+            <button class="menu-item" id="expCsv">Jelöltlista CSV-ben</button>
+            <button class="menu-item" id="expJson">Nyers adat (JSON)</button>
+            <button class="menu-item" id="engArchive">${p.archived ? "Archiválás visszavonása" : "Archiválás"}</button>
+            <button class="menu-item danger" id="engDelete">Megbízás törlése</button>
+          </div>
+        </details>
         <button class="btn btn-ghost" id="backBtn">← Megbízások</button>
       </div>
     </div>
     ${pgHtml}
     ${chipsArr.length ? `<div class="eng-chips">${chipsArr.map((c) => `<span class="chip">${esc(c)}</span>`).join("")}</div>` : ""}
   </div>`;
+  const te = $("#topEng");
+  if (te) te.innerHTML = `<span class="top-eng-t">${esc(shorten(pos.title || p.name, 34))}</span><span class="top-eng-c">${esc(pos.client || "")}</span>`;
   $("#statusSel").onchange = async (e) => {
     p.status = e.target.value;
     persist();
@@ -824,16 +1095,128 @@ function renderEngHeader(p) {
     toast("Státusz frissítve.");
     render(state.view);
   };
-  $("#exportBtn").onclick = () => {
-    const blob = new Blob([JSON.stringify(p, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${p.id}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    toast("Megbízás exportálva.");
+  $("#exportBtn").onclick = () => exportShortlist(p);
+  $("#expCsv").onclick = () => exportCsv(p);
+  $("#expJson").onclick = () => download(`${p.id}.json`, JSON.stringify(p, null, 2), "application/json");
+  $("#engArchive").onclick = () => {
+    p.archived = !p.archived;
+    persist();
+    toast(p.archived ? "Megbízás archiválva." : "Archiválás visszavonva.");
+    p.archived ? closeEngagement() : render(state.view);
   };
+  $("#engDelete").onclick = () => deleteEngagement(p);
   $("#backBtn").onclick = () => closeEngagement();
+}
+
+function download(name, text, mime) {
+  const blob = new Blob([text], { type: mime + ";charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+// A törlés az egyetlen visszafordíthatatlan művelet — ezért nem elég a
+// megerősítés: a kivett megbízás a visszavonó buborék lejártáig visszahozható.
+function deleteEngagement(p) {
+  if (!confirm(`Törlöd ezt a megbízást?\n\n${p.position.title || p.name}\n${(p.candidates || []).length} jelölttel\n\nA törlés után 10 másodpercig visszavonható.`)) return;
+  const snapshot = lsDelete(p.id);
+  closeEngagement();
+  const t = $("#toast");
+  t.innerHTML = `<span>Megbízás törölve.</span><button class="btn toast-undo" id="undoDel">Visszavonás</button>`;
+  t.classList.remove("hidden");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { t.classList.add("hidden"); t.textContent = ""; }, 10000);
+  announce("Megbízás törölve. A visszavonás tíz másodpercig elérhető.");
+  $("#undoDel").onclick = () => {
+    lsRestore(snapshot);
+    clearTimeout(toast._t);
+    t.classList.add("hidden"); t.textContent = "";
+    renderHome();
+    toast("Törlés visszavonva.");
+  };
+}
+
+/* ── ÜGYFÉLNEK ADHATÓ SHORTLIST ──────────────────────────────────────────
+   A fejvadász deliverable-je egy dokumentum, amit a hiring manager elolvas.
+   Eddig az egyetlen kijárat egy `p.id.json` volt — fejlesztői artefaktum ott,
+   ahol emberi olvasnivaló kell. Minden, amit a termék nehezen kiharcol (őszinte
+   besorolás, evidencia-nyom, lefedettségi vakfolt), pontosan az, amit egy
+   ügyfél-prezentáción meg kell mutatni. Ez a nyomtatható HTML az. */
+function shortlistRows(p) {
+  const ranked = (p.ranking && p.ranking.ranked) || [];
+  const byId = {};
+  ranked.forEach((r) => (byId[r.candidate_id] = r));
+  return activeCandidates(p)
+    .map((c) => candRow(p, c, byId[c.id]))
+    .filter((r) => r.tier === "A" || r.tier === "B")
+    .sort((a, b) => (a.tier === b.tier ? (a.priority || 99) - (b.priority || 99) : a.tier < b.tier ? -1 : 1));
+}
+function exportShortlist(p) {
+  const rows = shortlistRows(p);
+  if (!rows.length) return toast("Még nincs A vagy B prioritású jelölt a shortlisthez.", true);
+  const pos = p.position || {};
+  const fi = funnelInfo(p);
+  const today = new Date().toISOString().slice(0, 10);
+  const card = (r) => {
+    const c = r.cand, a = (p.assessments || {})[r.id] || {};
+    const sig = (c.signals || []).filter((s) => s.strength === "erős").slice(0, 4);
+    return `<article class="c">
+      <div class="ch"><span class="t t${r.tier}">${r.tier}</span><h3>${esc(c.name)}</h3></div>
+      <p class="hl">${esc(c.headline || "")}${c.current_company ? " · " + esc(c.current_company) : ""}${c.location ? " · " + esc(c.location) : ""}</p>
+      ${r.reason ? `<p class="wy"><b>Miért ő:</b> ${esc(r.reason)}</p>` : ""}
+      ${sig.length ? `<p class="sg"><b>Igazolt jelek:</b> ${sig.map((s) => esc(s.signal)).join(" · ")}</p>` : ""}
+      ${F.qclarify(a).length ? `<p class="qs"><b>Beszélgetésen tisztázandó:</b> ${F.qclarify(a).map(esc).join(" · ")}</p>` : ""}
+      ${(a.unknowns || []).length ? `<p class="uk"><b>Amit nem tudunk:</b> ${a.unknowns.map(esc).join(" · ")}</p>` : ""}
+    </article>`;
+  };
+  const html = `<!doctype html><html lang="hu"><head><meta charset="utf-8">
+<title>Shortlist — ${esc(pos.title || p.name)}</title>
+<style>
+  @page{margin:18mm}
+  *{box-sizing:border-box}
+  body{font:14px/1.55 "Avenir Next",Avenir,"Segoe UI",system-ui,sans-serif;color:#172238;margin:0;padding:28px;max-width:62rem}
+  h1{font-size:24px;margin:0 0 2px;letter-spacing:-.01em}
+  .sub{color:#5D6678;font-size:13px;margin-bottom:20px}
+  .fx{display:flex;gap:18px;align-items:flex-end;border-top:1px solid #EAE6DC;border-bottom:1px solid #EAE6DC;padding:14px 0;margin-bottom:22px}
+  .fx div{flex:1}.fx b{display:block;font-size:20px}.fx span{font-size:11px;color:#5D6678}
+  .fx i{width:12px;height:12px;border-radius:50%;background:#FF5A5F;display:block;margin-bottom:4px}
+  .c{border-top:1px solid #EAE6DC;padding:16px 0;page-break-inside:avoid}
+  .ch{display:flex;align-items:baseline;gap:10px}
+  .ch h3{margin:0;font-size:16px}
+  .t{font-weight:800;font-size:11px;padding:2px 8px;border-radius:20px;background:#D5F3EA;color:#0B7D66}
+  .tB{background:#E4EBF7;color:#2F4A80}
+  .hl{color:#5D6678;font-size:13px;margin:3px 0 8px}
+  p{margin:5px 0;font-size:13px}
+  .uk,.qs{color:#5D6678}
+  footer{margin-top:28px;border-top:1px solid #EAE6DC;padding-top:12px;font-size:11px;color:#5D6678}
+</style></head><body>
+<h1>${esc(pos.title || p.name)}</h1>
+<div class="sub">${[pos.client, pos.location, pos.work_mode, pos.seniority].filter(Boolean).map(esc).join(" · ")} — shortlist, ${today}</div>
+<div class="fx">
+  <div><b>${fi.felkutatva}</b><span>felkutatva</span></div>
+  <div><b>${fi.prioritasos}</b><span>prioritásos</span></div>
+  <div><b>${fi.megkeresve}</b><span>megkeresve</span></div>
+  <div><b>${fi.valaszolt}</b><span>válaszolt</span></div>
+  <div style="flex:0"><i></i><span>${fi.pozitiv} pozitív</span></div>
+</div>
+${rows.map(card).join("")}
+<footer>A besorolás a recruiter döntése, az elemzés javaslat. „Amit nem tudunk" tételek szándékosan szerepelnek: ezek a beszélgetésen tisztázandók, nem hiányosságok.${fi.kizart ? ` ${fi.kizart} találat kizárva a merítésből (ügyfél jelenlegi vagy volt munkatársa, illetve off-limits cég).` : ""}</footer>
+</body></html>`;
+  download(`${p.id}-shortlist-${today}.html`, html, "text/html");
+  toast(`Shortlist exportálva — ${rows.length} jelölt. Böngészőben megnyitva nyomtatható PDF-be.`);
+}
+function exportCsv(p) {
+  const q = (s) => `"${String(s == null ? "" : s).replace(/"/g, '""')}"`;
+  const head = ["Prioritás", "Név", "Headline", "Jelenlegi cég", "Helyszín", "Erős jelek", "Forrás", "Következő lépés", "Indoklás"];
+  const rows = activeCandidates(p).map((c) => {
+    const r = candRow(p, c);
+    return [r.tier || "—", c.name, c.headline, c.current_company, c.location,
+      (c.signals || []).filter((s) => s.strength === "erős").map((s) => s.signal).join("; "),
+      srcLabel(c.source_type), STAGE_LABEL[r.stage] || "", r.reason || ""].map(q).join(",");
+  });
+  download(`${p.id}-jeloltek.csv`, "﻿" + [head.map(q).join(","), ...rows].join("\r\n"), "text/csv");
+  toast("Jelöltlista CSV-ben exportálva.");
 }
 
 // ── ÁTTEKINTÉS ──────────────────────────────────────────────────────────
@@ -861,13 +1244,17 @@ function funnelInfo(p) {
 const FUNNEL_STEPS = [["felkutatva", "felkutatva"], ["prioritasos", "prioritásos"], ["megkeresve", "megkeresve"], ["valaszolt", "válaszolt"]];
 function funnelHtml(fi) {
   const max = Math.max(1, fi.felkutatva);
-  return `<div class="funnel" role="img" aria-label="${FUNNEL_STEPS.map(([k, l]) => `${fi[k]} ${l}`).join(", ")}">
+  return `<div class="funnel" role="img" aria-label="${FUNNEL_STEPS.map(([k, l]) => `${fi[k]} ${l}`).join(", ")}, ${fi.pozitiv} pozitív válasz">
     ${FUNNEL_STEPS.map(([k, l]) => `<div class="fseg">
       <div class="fnum">${fi[k]}</div>
       <div class="ftrack"><span class="fbar" style="width:${Math.round(Math.min(1, fi[k] / max) * 100)}%"></span></div>
       <div class="flab">${esc(l)}</div>
     </div>`).join("")}
-    <span class="fdot${fi.pozitiv ? " full" : ""}" title="${fi.pozitiv} pozitív válasz"></span>
+    <div class="fseg fseg-end">
+      <div class="fnum">${fi.pozitiv}</div>
+      <div class="ftrack"><span class="fdot${fi.pozitiv ? " full" : ""}"></span></div>
+      <div class="flab">pozitív</div>
+    </div>
   </div>`;
 }
 function renderOverview(p) {
@@ -903,7 +1290,7 @@ function renderOverview(p) {
           <span class="todo-need">${esc(t.txt)}</span>
           <button class="btn todo-cta" data-id="${esc(t.r.id)}" data-tab="${esc(t.tab)}">${esc(t.cta)}</button>
         </div>`).join("")}
-        ${todo.length > 5 ? `<div class="kpi-desc">…és további ${todo.length - 5} jelölt.</div>` : ""}</div>`
+        ${todo.length > 5 ? `<div class="card-d">…és további ${todo.length - 5} jelölt.</div>` : ""}</div>`
         : `<div class="ov-empty sm">Minden prioritásos jelöltnél megvan a következő lépés.</div>`}
     </div>
     <div class="ov-grid">
@@ -961,22 +1348,30 @@ async function touchCand(id) {
     persist();
     render(state.view);
     toast("Aktivitás rögzítve.");
-  } catch (e) { toast("Hiba: " + e.message); }
+  } catch (e) { const i = errorInfo(e); toast(i.title + " " + i.detail, true); }
 }
 
 // ── POZÍCIÓ ÉS BRIEF ────────────────────────────────────────────────────
-const POS_FIELDS = [
-  ["title", "Pozíció neve"], ["client", "Ügyfél"], ["location", "Helyszín"],
-  ["work_mode", "Munkavégzés"], ["seniority", "Tapasztalati szint"], ["owner", "Felelős recruiter"],
-  ["hiring_manager", "Hiring manager"], ["language", "Nyelv"], ["salary_band", "Bérsáv"], ["due_date", "Céldátum"],
+/* Tíz lapos, egyenrangú mező helyett három csoport. A csoportosítás nem
+   kozmetika: a „ki dolgozik rajta" és a „mi a szerep" két külön kérdés, és a
+   három egyenlő oszlopból álló rács volt az, ami a hosszú chip-listák mellett
+   túlnyúlt és rárajzolt a szomszéd oszlop címkéire. */
+const POS_GROUPS = [
+  ["A szerep", [["title", "Pozíció neve", "text"], ["client", "Ügyfél", "text"], ["seniority", "Tapasztalati szint", "text"]]],
+  ["Feltételek", [["location", "Helyszín", "text"], ["work_mode", "Munkavégzés", "select"], ["language", "Nyelv", "text"], ["salary_band", "Bérsáv", "text"]]],
+  ["Felelősség és határidő", [["owner", "Felelős recruiter", "text"], ["hiring_manager", "Hiring manager", "text"], ["due_date", "Céldátum", "date"]]],
 ];
 function renderPositionView(p) {
   $("#briefInput").value = p.brief_raw || "";
-  $("#posForm").innerHTML = `<div class="form-grid">` + POS_FIELDS.map(([k, lbl]) => {
-    if (k === "work_mode") return `<div class="fld"><label>${lbl}</label><select data-pos="${k}">${WORK_MODES.map((m) => `<option value="${m}" ${p.position[k] === m ? "selected" : ""}>${m || "—"}</option>`).join("")}</select></div>`;
-    const type = k === "due_date" ? "date" : "text";
-    return `<div class="fld"><label>${lbl}</label><input type="${type}" data-pos="${k}" value="${esc(p.position[k] || "")}" /></div>`;
-  }).join("") + `</div>`;
+  $("#posForm").innerHTML = POS_GROUPS.map(([title, fields]) => `
+    <fieldset class="pos-group">
+      <legend>${esc(title)}</legend>
+      <div class="form-grid">${fields.map(([k, lbl, type]) => {
+        const id = "pos_" + k;
+        if (type === "select") return `<div class="fld"><label for="${id}">${esc(lbl)}</label><select id="${id}" data-pos="${k}">${WORK_MODES.map((m) => `<option value="${m}" ${p.position[k] === m ? "selected" : ""}>${m || "—"}</option>`).join("")}</select></div>`;
+        return `<div class="fld"><label for="${id}">${esc(lbl)}</label><input id="${id}" type="${type}" data-pos="${k}" value="${esc(p.position[k] || "")}" /></div>`;
+      }).join("")}</div>
+    </fieldset>`).join("");
   $$("#posForm [data-pos]").forEach((inp) => (inp.onchange = async () => {
     p.position[inp.dataset.pos] = inp.value.trim();
     p.name = [p.position.title, p.position.client].filter(Boolean).join(" · ") || p.name;
@@ -1024,10 +1419,10 @@ function renderIntake(p) {
     <div class="card bf-card">
       <h4>Véglegesített brief
         <span class="ai-status ${approved ? "ok" : ""}">${approved ? "Recruiter által véglegesítve" : "Vázlat — még nincs véglegesítve"}</span>
-        ${edited ? `<span class="ev-tag inference">szerkesztve</span>` : ""}
+        ${edited ? evTag("inference","szerkesztve") : ""}
       </h4>
-      <p class="kpi-desc" style="margin-top:0">Ez a szöveg megy tovább a keresésbe, a megkeresésekbe és az ügyfél-egyeztetésbe. Szerkeszd szabadon, majd véglegesítsd.</p>
-      <textarea id="bfText" class="brief bf-text" placeholder="A véglegesített pozíció-összefoglaló…">${esc(b.text)}</textarea>
+      <p class="card-d" style="margin-top:0">Ez a szöveg megy tovább a keresésbe, a megkeresésekbe és az ügyfél-egyeztetésbe. Szerkeszd szabadon, majd véglegesítsd.</p>
+      <label class="sr-only" for="bfText">Véglegesített pozíció-összefoglaló</label><textarea id="bfText" class="brief bf-text" placeholder="A véglegesített pozíció-összefoglaló…">${esc(b.text)}</textarea>
       <div class="bf-lists">
         <div><div class="cov-label">Elengedhetetlen feltételek</div>${chipEditor("bfMust", b.must_haves, { placeholder: "Új feltétel…" })}</div>
         <div><div class="cov-label">Előnyt jelent</div>${chipEditor("bfNice", b.nice_to_haves, { placeholder: "Új előny…" })}</div>
@@ -1037,20 +1432,21 @@ function renderIntake(p) {
         <button class="btn" id="bfCopy">Másolás</button>
         <button class="btn btn-ghost" id="bfReset" title="Az AI eredeti javaslatának visszaállítása">Vissza az AI-javaslathoz</button>
       </div>
-      ${approved && b.approved_at ? `<div class="kpi-desc">Véglegesítve: ${esc(String(b.approved_at).slice(0, 16).replace("T", " "))}${edited ? " · a recruiter módosította az AI-javaslatot" : ""}</div>` : ""}
+      ${approved && b.approved_at ? `<div class="card-d">Véglegesítve: ${esc(String(b.approved_at).slice(0, 16).replace("T", " "))}${edited ? " · a recruiter módosította az AI-javaslatot" : ""}</div>` : ""}
     </div>
-    <div class="card">
-      <h4>Az AI eredeti javaslata ${demoTag(o)}</h4>
+    ${F.clarif(o).length ? `<div class="card card-clarif"><h4>Tisztázandó pontok ${evTag("assume")}</h4>
+      <p class="card-d">Ezeket vidd vissza a hiring managerhez — a brief ezekre nem ad választ.</p>
+      ${F.clarif(o).map((f) => `<div class="flag">${esc(f)}</div>`).join("")}</div>` : ""}
+    ${F.inferred(o).length ? `<div class="card"><h4>Feltételezett további igények ${evTag("assume")}</h4>${list(F.inferred(o))}</div>` : ""}
+    ${(o.search_hypotheses || []).length ? `<div class="card"><h4>Keresési hipotézisek ${evTag("inference")}</h4>${list(o.search_hypotheses)}</div>` : ""}
+    <details class="card card-orig" id="aiOrig"${detailsOpen("aiOrig")}>
+      <summary><h4>Az AI eredeti javaslata ${demoTag(o)}</h4><span class="card-d">— összevetéshez</span></summary>
       <p class="lead">${esc(o.reframed_brief)}</p>
-      <details class="or-why" style="margin-top:8px"><summary>Eredeti feltétel-listák</summary>
-        <h4 style="margin-top:8px">Elengedhetetlen feltételek</h4>${list(o.must_haves)}
-        <h4 style="margin-top:10px">Előnyt jelent</h4>${chips(o.nice_to_haves)}
-      </details>
-    </div>
-    ${F.clarif(o).length ? `<div class="card"><h4>Tisztázandó pontok</h4>${F.clarif(o).map((f) => `<div class="flag">${esc(f)}</div>`).join("")}</div>` : ""}
-    ${F.inferred(o).length ? `<div class="card"><h4>Feltételezett további igények <span class="ev-tag assume">Ellenőrizendő feltételezés</span></h4>${list(F.inferred(o))}</div>` : ""}
-    ${(o.search_hypotheses || []).length ? `<div class="card"><h4>Keresési hipotézisek</h4>${list(o.search_hypotheses)}</div>` : ""}
+      <div class="cov-label" style="margin-top:10px">Elengedhetetlen feltételek</div>${list(o.must_haves)}
+      <div class="cov-label" style="margin-top:10px">Előnyt jelent</div>${chips(o.nice_to_haves)}
+    </details>
   `;
+  wireDetails("aiOrig");
   $("#bfText").oninput = () => { b.text = $("#bfText").value; };
   $("#bfText").onchange = () => { b.text = $("#bfText").value; persist(); };
   wireChipEditor("bfMust",
@@ -1127,7 +1523,7 @@ function renderQuery(p) {
   out.innerHTML = `
     <div class="card">
       <h4>Keresési terv ${demoTag(o)} ${edited ? `<span class="ai-status ok">Recruiter által szerkesztve</span>` : `<span class="ai-status">AI-javaslat — szerkeszthető</span>`}</h4>
-      <p class="kpi-desc" style="margin-top:0">A kategóriákhoz bármikor hozzáadhatsz vagy elvehetsz belőlük — a frissítés nem törli a kézi elemeidet.</p>
+      <p class="card-d" style="margin-top:0">A kategóriákhoz bármikor hozzáadhatsz vagy elvehetsz belőlük — a frissítés nem törli a kézi elemeidet.</p>
       <div class="cov-label" style="margin-top:10px">Célpozíciók</div>${chipEditor("qTitles", o.target_titles, { placeholder: "Új célpozíció…" })}
       <div class="cov-label" style="margin-top:12px">Célcégek</div>${chipEditor("qCompanies", o.target_companies, { placeholder: "Új célcég…" })}
       <div class="cov-label" style="margin-top:12px">Kulcs-szinonimák</div>${chipEditor("qSyn", o.synonyms, { placeholder: "Új szinonima…" })}
@@ -1135,7 +1531,7 @@ function renderQuery(p) {
         <div class="cov-label" style="margin-top:8px">Boolean / X-ray lekérdezések</div>
         ${(o.boolean_queries || []).map((q, i) => `<div class="q-row"><div class="q-plat">${esc(q.platform || "egyéb")}</div><textarea class="q-code q-edit" data-qi="${i}" rows="2">${esc(q.query || "")}</textarea><button class="btn ed-x-btn" data-qrm="${i}" title="Lekérdezés törlése">×</button></div>`).join("")
           || `<div class="ed-empty">— még nincs lekérdezés —</div>`}
-        <div class="ed-add q-add"><input class="ed-in" id="qBoolNew" placeholder="Új boolean lekérdezés…" /><button class="btn" id="qBoolAdd">+</button></div>
+        <div class="ed-add q-add"><label class="sr-only" for="qBoolNew">Új boolean lekérdezés</label><input class="ed-in" id="qBoolNew" placeholder="Új boolean lekérdezés…" /><button class="btn" id="qBoolAdd" aria-label="Boolean lekérdezés hozzáadása">+</button></div>
         <div class="cov-label" style="margin-top:14px">Webes kereső-lekérdezések</div>
         ${chipEditor("qWeb", o.firecrawl_search_queries, { placeholder: "Új webes lekérdezés…" })}
       </details>
@@ -1187,7 +1583,7 @@ function renderExclusions(p) {
   out.innerHTML = `
     <div class="card excl-card">
       <h4>Kizárás a merítésből ${excl.length ? `<span class="cov-flag">${excl.length} jelölt kiszűrve</span>` : `<span class="cov-ok">nincs ütközés</span>`}</h4>
-      <p class="kpi-desc" style="margin-top:0">${client
+      <p class="card-d" style="margin-top:0">${client
         ? `Az ügyfél (<b>${esc(client)}</b>) jelenlegi és volt munkatársai nem kerülnek a jelöltlistára — őket a hiring manager ismeri. A cégnév-egyezés a leányvállalati és rövidített alakokat is felismeri.`
         : `Add meg az ügyfél nevét a <b>Pozíció és brief</b> nézetben, hogy a saját munkatársai automatikusan kimaradjanak.`}</p>
       ${sum ? `<div class="excl-sum">${esc(sum)}</div>` : ""}
@@ -1220,7 +1616,7 @@ function renderTalent(p) {
     <div class="cov-label">Célcégek</div>
     ${(o.target_companies || []).map((c, i) => `<div class="tm-row"><div><span class="rank-name">${esc(c.name)}</span>${c.why ? ` — <span class="crow-meta">${esc(c.why)}</span>` : ""}${(c.likely_roles || []).length ? chips(c.likely_roles) : ""}</div><button class="btn ed-x-btn" data-tmrm="${i}" title="Eltávolítás">×</button></div>`).join("")
       || `<div class="ed-empty">— még nincs célcég —</div>`}
-    <div class="ed-add q-add"><input class="ed-in" id="tmNewName" placeholder="Célcég neve…" /><input class="ed-in" id="tmNewWhy" placeholder="Miért releváns? (opcionális)" /><button class="btn" id="tmAdd">+</button></div>
+    <div class="ed-add q-add"><label class="sr-only" for="tmNewName">Célcég neve</label><input class="ed-in" id="tmNewName" placeholder="Célcég neve…" /><label class="sr-only" for="tmNewWhy">Miért releváns</label><input class="ed-in" id="tmNewWhy" placeholder="Miért releváns? (opcionális)" /><button class="btn" id="tmAdd" aria-label="Célcég hozzáadása">+</button></div>
     ${(o.competitor_clusters || []).length || true ? `<div class="cov-label" style="margin-top:14px">Versenytárs-klaszterek</div>${chipEditor("tmClusters", o.competitor_clusters, { placeholder: "Új klaszter…" })}` : ""}
     <div class="cov-label" style="margin-top:12px">Közösségek, rendezvények</div>${chipEditor("tmGather", o.where_they_gather, { placeholder: "Új közösség / rendezvény…" })}
   </div>`;
@@ -1306,7 +1702,7 @@ function renderStrategyChat(p) {
   if (!box) return;
   const keep = $("#chatIn") ? $("#chatIn").value : "";   // a félig begépelt üzenet nem veszhet el
   const log = p.strategy_chat || [];
-  box.innerHTML = `<div class="stage">
+  box.innerHTML = `<section class="substage">
     <div class="stage-head"><h2>Stratégia-asszisztens</h2>
       <p class="stage-sub">Írd le szövegesen, mit változtasson a keresési terven vagy a célpiac-térképen. Minden módosítás tételes és visszavonható — az asszisztens csak ehhez a két dologhoz nyúlhat.</p></div>
     <details class="or-why" id="sysPromptBox"${detailsOpen("sysPromptBox")}><summary>Rendszer-prompt — mit tud és mit nem</summary>
@@ -1325,11 +1721,11 @@ function renderStrategyChat(p) {
     }).join("") : `<div class="chat-empty">Például: „Adj hozzá a célcégekhez: (nemzetközi PSP D)” · „Vedd ki a célpozíciók közül a Tech Lead-et” · „Milyen szinonimákat javasolsz?”</div>`}</div>
     <div class="chat-quick">${STRAT_QUICK.map((q) => `<button class="ck-mini chat-q">${esc(q)}</button>`).join("")}</div>
     <div class="row" style="margin-top:10px">
-      <input id="chatIn" class="brief-line" placeholder="Mit módosítsak a stratégián?" autocomplete="off" />
+      <label class="sr-only" for="chatIn">Üzenet a stratégia-asszisztensnek</label><input id="chatIn" class="brief-line" placeholder="Mit módosítsak a stratégián?" autocomplete="off" />
       <button id="chatSend" class="btn btn-primary">Küldés</button>
       ${log.length ? `<button id="chatClear" class="btn btn-ghost">Előzmény törlése</button>` : ""}
     </div>
-  </div>`;
+  </section>`;
   wireDetails("sysPromptBox");
   if (keep) $("#chatIn").value = keep;
   const logEl = $("#chatLog");
@@ -1367,8 +1763,8 @@ async function sendStrategyChat(p, msg) {
   persist();
   renderStrategyChat(p);
   const btn = $("#chatSend");   // az újrarender után kell lekérdezni
-  await withLoading(btn, async () => {
-    const res = await api("POST", `/api/project/${p.id}/strategy-chat`, { message: msg });
+  await withLoading(btn, async (signal) => {
+    const res = await api("POST", `/api/project/${p.id}/strategy-chat`, { message: msg }, { signal });
     if (res.system_prompt) p.strategy_system_prompt = res.system_prompt;
     const entry = { role: "assistant", text: res.reply || "", actions: [], proposals: (res.proposals || []).map((x) => ({ ...x, applied: false })), ts: new Date().toISOString() };
     for (const a of res.actions || []) {
@@ -1473,36 +1869,47 @@ function candMatches(p, x, f, withState) {
   }
   return true;
 }
+// A prioritás-választó minden opciója a teljes címkét viseli, nem a puszta
+// betűt: a „D" önmagában nem mondja meg, hogy „most nem javasolt".
+function prioOptions(t) {
+  return `<option value="" ${!t ? "selected" : ""}>— nincs</option>` +
+    ["A", "B", "C", "D"].map((k) => `<option value="${k}" ${t === k ? "selected" : ""}>${esc(TIER_LABEL[k])}</option>`).join("");
+}
+/* A kártya korábban egy 5 opciós <select>-tel kezdődött, az ember neve fölött —
+   az adminisztratív vezérlő rangsorolta felül a jelöltet. Ráadásul a kártya
+   role="button" volt, benne egy <select>-tel: interaktív elem gomb belsejében,
+   érvénytelen ARIA, és az aria-label elnyomta a headline-t és a jeleket.
+   Most a név a belépési pont (saját gomb), a besorolás a lábban ül. */
 function candCardHtml(p, x) {
   const t = effTier(p, x.id);
   const ov = p.priority_overrides[x.id];
-  return `<div class="bcard tier-${t || "none"}" data-id="${esc(x.id)}" tabindex="0" role="button" aria-label="${esc(x.name)} megnyitása">
-    <div class="bcard-top">
-      <select class="prio-sel bcard-prio" data-id="${esc(x.id)}" title="Prioritás — a recruiter felülbírálhatja" aria-label="Prioritás">
-        <option value="" ${!t ? "selected" : ""}>—</option>
-        ${["A", "B", "C", "D"].map((k) => `<option value="${k}" ${t === k ? "selected" : ""}>${k}</option>`).join("")}
-      </select>
-      ${x.is_new ? `<span class="new-chip">Új</span>` : ""}
+  return `<div class="bcard tier-${t || "none"}" data-id="${esc(x.id)}">
+    <button class="bcard-open" data-id="${esc(x.id)}">
+      <span class="bcard-name">${esc(x.name)}${x.is_new ? ` <span class="new-chip">Új</span>` : ""}</span>
+      <span class="bcard-meta">${esc(x.headline || "")}</span>
+      <span class="bcard-meta dim">${esc([x.current_company, x.location].filter(Boolean).join(" · "))}</span>
+      <span class="bcard-chips">${candStateChips(p, x)}<span class="chip">${strongCount(x)} erős jel</span></span>
+      <span class="bcard-next">${esc(candNext(p, x))}</span>
+    </button>
+    <div class="bcard-foot">
+      <span class="bcard-tier t-${t || "none"}" aria-hidden="true">${t || "—"}</span>
+      <label class="sr-only" for="prio-b-${esc(x.id)}">${esc(x.name)} prioritása</label>
+      <select class="prio-sel bcard-prio" id="prio-b-${esc(x.id)}" data-id="${esc(x.id)}">${prioOptions(t)}</select>
       ${ov ? `<span class="bcard-ov" title="A recruiter állította be">kézzel</span>` : ""}
     </div>
-    <div class="bcard-name">${esc(x.name)}</div>
-    <div class="bcard-meta">${esc(x.headline || "")}</div>
-    <div class="bcard-meta dim">${esc([x.current_company, x.location].filter(Boolean).join(" · "))}</div>
-    <div class="bcard-chips">${candStateChips(p, x)}<span class="chip">${strongCount(x)} erős jel</span></div>
-    <div class="bcard-next">${esc(candNext(p, x))}</div>
   </div>`;
 }
 function candRowHtml(p, x) {
   const t = effTier(p, x.id);
   const ov = p.priority_overrides[x.id];
   return `<div class="crow tier-${t || "none"}" data-id="${esc(x.id)}">
-    <select class="prio-sel" data-id="${esc(x.id)}" title="Prioritás — a recruiter felülbírálhatja">
-      <option value="" ${!t ? "selected" : ""}>—</option>
-      ${["A", "B", "C", "D"].map((k) => `<option value="${k}" ${t === k ? "selected" : ""}>${k}</option>`).join("")}
-    </select>
+    <div class="crow-prio">
+      <label class="sr-only" for="prio-l-${esc(x.id)}">${esc(x.name)} prioritása</label>
+      <select class="prio-sel" id="prio-l-${esc(x.id)}" data-id="${esc(x.id)}">${prioOptions(t)}</select>
+    </div>
     <div><div class="crow-name">${esc(x.name)}</div><div class="crow-head">${esc(x.headline || "")}</div></div>
     <div class="crow-meta">${esc(x.current_company || "")}${x.location ? "<br>" + esc(x.location) : ""}</div>
-    <div class="crow-meta">${srcLabel(x.source_type)}<br><span class="mut">${strongCount(x)} erős jel</span>${ov ? `<br><span class="mut" style="font-size:10px">kézzel állítva</span>` : ""}</div>
+    <div class="crow-meta">${srcLabel(x.source_type)}<br><span class="mut">${strongCount(x)} erős jel</span>${ov ? `<br><span class="mut">kézzel állítva</span>` : ""}</div>
     <div class="crow-state">${candStateChips(p, x)}<div class="mut" style="margin-top:3px">Következő: ${candNext(p, x)}</div></div>
     <button class="btn crow-open" data-id="${esc(x.id)}">Részletek</button>
   </div>`;
@@ -1565,8 +1972,8 @@ function renderCandidatesView(p) {
       ${isBoard ? "" : `<select id="fState" aria-label="Állapot szűrő"><option value="">állapot: mind</option><option value="new" ${f.state === "new" ? "selected" : ""}>új</option><option value="noplan" ${f.state === "noplan" ? "selected" : ""}>nincs terv</option><option value="nodraft" ${f.state === "nodraft" ? "selected" : ""}>nincs vázlat</option><option value="sent" ${f.state === "sent" ? "selected" : ""}>kiküldve</option><option value="replied" ${f.state === "replied" ? "selected" : ""}>válaszolt</option></select>`}
       <span class="mut" style="font-size:12px">${shown.length}/${act.length} látható</span>
     </div>
-    ${rankNote}
-    ${p.ranking && p.ranking.note ? `<div class="kpi-desc" style="margin:6px 0 2px">${esc(p.ranking.note)} ${demoTag(p.ranking)}</div>` : ""}
+    <div id="rankSlot">${rankNote}</div>
+    ${p.ranking && p.ranking.note ? `<div class="card-d" style="margin:6px 0 2px">${esc(p.ranking.note)} ${demoTag(p.ranking)}</div>` : ""}
     ${isBoard ? board : list}
 
     ${watch.length ? `<details class="lane" id="watchLane">
@@ -1615,13 +2022,7 @@ function renderCandidatesView(p) {
   }));
   $$("#exclRows .crow-excl").forEach((r) => (r.onclick = () => openPanel(r.dataset.id)));
   const rb = $("#rankBtn") || $("#rankBtn2");
-  if (rb) rb.onclick = (e) => withLoading(e.target, async () => {
-    const r = await api("POST", `/api/project/${p.id}/rank`);
-    p.ranking = r;
-    persist();
-    renderCandidatesView(p);
-    toast("Prioritási javaslat kész — ellenőrizd és igazítsd, ha kell.");
-  });
+  if (rb) rb.onclick = (e) => runRank(e.target, p);
   $$("#view-jeloltek .prio-sel").forEach((sel) => {
     sel.onclick = (e) => e.stopPropagation();
     sel.onkeydown = (e) => e.stopPropagation();
@@ -1630,15 +2031,21 @@ function renderCandidatesView(p) {
       if (sel.value) p.priority_overrides[id] = sel.value;
       else delete p.priority_overrides[id];
       persist();
+      // A teljes tábla újraépül, ezért a vízszintes görgetés eddig minden
+      // egyes besorolásnál nullára ugrott — balról jobbra triázsolni így
+      // fizikailag lehetetlen volt. Megjegyezzük és visszaállítjuk.
+      const b = $("#candBoard");
+      const sx = b ? b.scrollLeft : 0;
       renderCandidatesView(p);
+      const b2 = $("#candBoard");
+      if (b2) b2.scrollLeft = sx;
+      const again = $("#prio-b-" + CSS.escape(id)) || $("#prio-l-" + CSS.escape(id));
+      if (again) again.focus();
     };
   });
   $$("#view-jeloltek .crow-open").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); openPanel(b.dataset.id); }));
   $$("#candRows .crow, #watchRows .crow").forEach((r) => (r.onclick = () => openPanel(r.dataset.id)));
-  $$("#candBoard .bcard").forEach((r) => {
-    r.onclick = () => openPanel(r.dataset.id);
-    r.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPanel(r.dataset.id); } };
-  });
+  $$("#candBoard .bcard-open").forEach((b) => (b.onclick = () => openPanel(b.dataset.id)));
   const fp = $("#fPrio"), fs = $("#fState");
   const applyFilters = () => {
     state.candFilter.prio = fp ? fp.value : "";
@@ -1647,6 +2054,26 @@ function renderCandidatesView(p) {
   };
   if (fp) fp.onchange = applyFilters;
   if (fs) fs.onchange = applyFilters;
+}
+
+/* A rangsorolás a másik hosszú művelet, ami éles környezetben elbukott (500),
+   és a bukás után a tábla pixelre ugyanaz maradt: a felhasználó nem tudta
+   megkülönböztetni a hibát attól, hogy el sem indította. A skeleton és a
+   hibakártya a rangsor-sávba kerül, közvetlenül a tábla fölé. */
+function runRank(btn, p) {
+  const pid = p.id;
+  return withLoading(btn, async (signal) => {
+    const r = await api("POST", `/api/project/${pid}/rank`, null, { signal });
+    if (!stillOn(pid)) return;
+    p.ranking = r;
+    persist();
+    renderCandidatesView(p);
+    toast("Prioritási javaslat kész — ellenőrizd és igazítsd, ha kell.");
+  }, {
+    into: "#rankSlot",
+    label: `${activeCandidates(p).length} jelölt rangsorolása`,
+    retry: () => runRank($("#rankBtn") || $("#rankBtn2") || btn, p),
+  }).catch(() => {});
 }
 
 // ── JELÖLT RÉSZLETES NÉZET (oldalsó panel) ──────────────────────────────
@@ -1658,8 +2085,21 @@ function syncScrim() {
   $("#scrim").classList.toggle("hidden", !on);
   document.body.classList.toggle("no-scroll", on);
 }
+/* Fókusz-visszaadás: a panelt megnyitó elemet megjegyezzük, és záráskor
+   oda tesszük vissza a fókuszt. Enélkül a bezárás után a fókusz a <body>-ra
+   esett vissza, és a billentyűzetes felhasználó elölről kezdhette a Tab-olást. */
+function rememberFocus() {
+  const a = document.activeElement;
+  state.lastFocus = a && a !== document.body ? a : null;
+}
+function restoreFocus() {
+  const a = state.lastFocus;
+  state.lastFocus = null;
+  if (a && document.contains(a) && a.offsetParent !== null) { try { a.focus(); } catch {} }
+}
 function openNotesDrawer() {
   if (!state.project) return;
+  rememberFocus();
   closeDrawer();
   state.notesOpen = true;
   $("#notesDrawer").classList.remove("hidden");
@@ -1672,12 +2112,14 @@ function closeNotesDrawer() {
   state.notesOpen = false;
   $("#notesDrawer").classList.add("hidden");
   syncScrim();
+  restoreFocus();
 }
 const PANEL_TABS = [["profil", "Profil"], ["megkozelites", "Megközelítés"], ["uzenet", "Üzenet"], ["naplo", "Napló"]];
 function openPanel(id, tab) {
   const p = state.project; if (!p) return;
   const c = candById(p, id); if (!c) return;
   const wasOpen = !!state.drawerId;
+  if (!wasOpen) rememberFocus();
   state.drawerId = id;
   state.panelTab = PANEL_TABS.some(([k]) => k === tab) ? tab : "profil";
   if (c.is_new) { c.is_new = false; persist(); }
@@ -1696,6 +2138,7 @@ function closeDrawer(fromPop) {
   $("#candDrawer").classList.add("hidden");
   syncScrim();
   if (!fromPop && history.state && history.state.jelPanel) { try { history.back(); } catch (e) {} }
+  restoreFocus();
 }
 // A régi név megmarad, hogy a hívási helyek egy helyen legyenek átvezethetők.
 function openDrawer(id) { openPanel(id); }
@@ -1730,6 +2173,7 @@ function renderNoteList(entries, opts) {
   }).join("");
 }
 function renderDrawer(p, c) {
+  const ts = $("#drawerTask"); if (ts) ts.innerHTML = "";
   $("#candDrawerTitle").textContent = c.name || c.id;
   $("#candDrawerSub").textContent = [c.headline, c.current_company].filter(Boolean).join(" · ");
   const a = (p.assessments || {})[c.id];
@@ -1742,9 +2186,16 @@ function renderDrawer(p, c) {
   const man = (p.exclusions.candidates || {})[c.id];
   const tab = state.panelTab || "profil";
 
+  // Fülek: a role="tab" eddig panel-asszociáció és nyílbillentyű nélkül állt,
+  // ami rosszabb, mint a sima gomb — a képernyőolvasó fület ígért, de a
+  // hozzá tartozó tartalmat nem lehetett megtalálni.
   const badge = { uzenet: o ? (s.sent ? "✓" : "•") : "", naplo: candTimeline(p, c).length || "" };
   $("#candTabs").innerHTML = PANEL_TABS.map(([k, lbl]) =>
-    `<button class="tab${tab === k ? " on" : ""}" role="tab" aria-selected="${tab === k}" data-tab="${k}">${esc(lbl)}${badge[k] ? `<span class="tab-b">${esc(String(badge[k]))}</span>` : ""}</button>`).join("");
+    `<button class="tab${tab === k ? " on" : ""}" role="tab" id="ctab-${k}" aria-controls="candDrawerBody"
+      aria-selected="${tab === k}" tabindex="${tab === k ? 0 : -1}" data-tab="${k}">${esc(lbl)}${badge[k] ? `<span class="tab-b">${esc(String(badge[k]))}</span>` : ""}</button>`).join("");
+  body.setAttribute("role", "tabpanel");
+  body.setAttribute("aria-labelledby", "ctab-" + tab);
+  body.setAttribute("tabindex", "0");
 
   const banner = exc
     ? `<div class="excl-banner d"><div><b>${esc(exc.label)}</b><div class="crow-meta">${esc(exc.detail || "")}</div></div>
@@ -1761,12 +2212,11 @@ function renderDrawer(p, c) {
       <div class="crow-meta" style="margin-top:4px">${[c.current_company, c.location].filter(Boolean).map(esc).join(" · ")}</div>
       ${(c.past_companies || []).length ? `<div class="crow-meta" style="margin-top:2px">Korábban: ${(c.past_companies || []).map(esc).join(" · ")}</div>` : ""}
       <div class="row" style="margin-top:8px">
-        <label style="font-size:12px">Prioritás:</label>
-        <select class="prio-sel" id="dPrio"><option value="">—</option>${["A", "B", "C", "D"].map((k) => `<option ${t === k ? "selected" : ""}>${k}</option>`).join("")}</select>
-        ${t ? `<span class="chip">${esc(TIER_LABEL[t])}</span>` : ""}
+        <label for="dPrio">Prioritás:</label>
+        <select class="prio-sel" id="dPrio">${prioOptions(t)}</select>
       </div>
     </div>
-    <div class="d-sec"><h5>Evidenciák és források <span class="ev-tag fact">Forrással igazolt</span></h5>
+    <div class="d-sec"><h5>Evidenciák és források ${evTag("fact")}</h5>
       ${(c.signals || []).map((sg) => `<div class="cand-sig"><span class="s">• ${esc(sg.signal)} <span class="chip ${sg.strength === "erős" ? "good" : sg.strength === "gyenge" ? "" : "warn"}">${esc(sg.strength || "")}</span></span></div>`).join("") || "<div class='mut'>Nincs rögzített jel.</div>"}
       <div class="prov" style="margin-top:6px">${c.source_url ? `<a href="${esc(c.source_url)}" target="_blank" rel="noopener">forrás ↗</a> · ` : ""}<span class="art14">Art. 14: ${esc(c.art14_status || "—")}</span> · ${srcLabel(c.source_type)}</div>
     </div>
@@ -1774,7 +2224,7 @@ function renderDrawer(p, c) {
       ${a ? `
         ${a.fit ? `<span class="chip ${String(a.fit).includes("nem") ? "crit" : a.fit === "erős" ? "good" : "warn"}">illeszkedés: ${esc(a.fit)}</span>` : ""}
         ${a.fit_reason ? `<p style="margin-top:6px">${esc(a.fit_reason)}</p>` : ""}
-        ${F.summary(a) ? `<p><b>Összegzés:</b> ${esc(F.summary(a))} <span class="ev-tag inference">Következtetés</span></p>` : ""}
+        ${F.summary(a) ? `<p><b>Összegzés:</b> ${esc(F.summary(a))} ${evTag("inference")}</p>` : ""}
         ${F.strength(a) ? `<p><b>Erősség:</b> ${esc(F.strength(a))}</p>` : ""}
         ${F.qclarify(a).length ? `<h5 style="margin-top:8px">A beszélgetésen tisztázandó</h5>${list(F.qclarify(a))}` : ""}
         ${(a.unknowns || []).length ? `<h5 style="margin-top:8px">Amit nem tudunk</h5>${a.unknowns.map((u) => `<div class="flag">? ${esc(u)}</div>`).join("")}` : ""}`
@@ -1783,7 +2233,7 @@ function renderDrawer(p, c) {
 
     megkozelites: `
     <div class="d-sec"><h5>Megközelítési terv ${at ? demoTag(at) : ""}</h5>
-      ${at ? renderAttractInner(at) : `<p class="kpi-desc" style="margin-top:0">Mit érdemes mondani ennek az embernek, és miért — a jeleiből visszavezetve.</p><button class="btn btn-primary" id="dAttract">Megközelítési terv készítése</button>`}
+      ${at ? renderAttractInner(at) : `<p class="card-d" style="margin-top:0">Mit érdemes mondani ennek az embernek, és miért — a jeleiből visszavezetve.</p><button class="btn btn-primary" id="dAttract">Megközelítési terv készítése</button>`}
     </div>
     ${at ? `<div class="d-sec"><h5>Következő lépés</h5>
       ${o ? `<p class="mut" style="font-size:12.5px">Az üzenetvázlat elkészült.</p><button class="btn" id="dGoMsg">Üzenet megnyitása</button>`
@@ -1796,9 +2246,10 @@ function renderDrawer(p, c) {
       <div class="crow-meta">Utolsó lépés: ${relTime(c.last_touched)}${s.sent ? " · kiküldve" : ""}${s.replied ? " · " + esc(sentiLabel(s.sentiment)) : ""}</div>
       <div class="row" style="margin-top:8px"><button class="btn" id="dTouch">Aktivitás rögzítése</button>
         ${!exc ? `<button class="btn btn-ghost" id="dExExclude" title="Kivétel a merítésből">Kizárom a merítésből</button>` : ""}</div>
+      <div id="dExcludeForm"></div>
     </div>
     <div class="d-sec"><h5>Jegyzet hozzáadása</h5>
-      <div class="row"><input id="dNoteIn" class="brief-line" placeholder="Mit érdemes tudni erről a jelöltről?" />
+      <div class="row"><label class="sr-only" for="dNoteIn">Jegyzet a jelöltről</label><input id="dNoteIn" class="brief-line" placeholder="Mit érdemes tudni erről a jelöltről?" />
         <button class="btn btn-primary" id="dNoteSave">Mentés</button></div>
     </div>
     <div class="d-sec"><h5>Előzmény</h5>
@@ -1807,7 +2258,18 @@ function renderDrawer(p, c) {
   };
   body.innerHTML = banner + (panes[tab] || panes.profil);
 
-  $$("#candTabs .tab").forEach((b) => (b.onclick = () => setPanelTab(b.dataset.tab)));
+  $$("#candTabs .tab").forEach((b, i, arr) => {
+    b.onclick = () => setPanelTab(b.dataset.tab);
+    b.onkeydown = (e) => {
+      const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : e.key === "Home" ? -i : e.key === "End" ? arr.length - 1 - i : 0;
+      if (!d) return;
+      e.preventDefault();
+      const n = arr[(i + d + arr.length) % arr.length];
+      setPanelTab(n.dataset.tab);
+      const moved = $("#candTabs .tab.on");
+      if (moved) moved.focus();
+    };
+  });
   if (tab === "uzenet") renderMessageTab(p, c.id, $("#orEditor"));
   const dGo = $("#dGoMsg"); if (dGo) dGo.onclick = () => setPanelTab("uzenet");
   const nSave = $("#dNoteSave");
@@ -1824,16 +2286,31 @@ function renderDrawer(p, c) {
   if (dInc) dInc.onclick = () => { setCandExclusion(p, c.id, "include", "A recruiter szándékosan bevonta."); renderDrawer(p, c); render(state.view); toast("Jelölt bevonva a merítésbe."); };
   const dRev = $("#dExRevert");
   if (dRev) dRev.onclick = () => { setCandExclusion(p, c.id, null); renderDrawer(p, c); render(state.view); toast("Visszaállítva az alapértelmezett kizárási szabály."); };
+  // A natív prompt() stílustalan, nem fordítható, és több mobil/in-app
+  // böngészőben blokkolt — az indoklás bekérése helyben történik.
   const dExc = $("#dExExclude");
   if (dExc) dExc.onclick = () => {
-    const r = prompt("Miért zárod ki ezt a jelöltet a merítésből? (opcionális)", "");
-    if (r === null) return;
-    setCandExclusion(p, c.id, "exclude", r);
-    renderDrawer(p, c);
-    // A jelölt nem tűnhet el nyomtalanul: nyitva mutatjuk, hova került.
-    state.openExcluded = true;
-    render(state.view);
-    toast("Jelölt kizárva a merítésből — a kizártak közt megtalálod.");
+    const host = $("#dExcludeForm");
+    if (!host) return;
+    host.innerHTML = `<div class="excl-ask">
+      <label for="dExcReason">Miért zárod ki? Az indoklás a kizártak listáján is látszik.</label>
+      <div class="row"><input id="dExcReason" class="brief-line" placeholder="pl. tavaly elutasított minket" />
+        <button class="btn btn-primary" id="dExcOk">Kizárom</button>
+        <button class="btn btn-ghost" id="dExcNo">Mégse</button></div>
+    </div>`;
+    const inp = $("#dExcReason");
+    inp.focus();
+    const go = () => {
+      setCandExclusion(p, c.id, "exclude", inp.value.trim());
+      // A jelölt nem tűnhet el nyomtalanul: nyitva mutatjuk, hova került.
+      state.openExcluded = true;
+      renderDrawer(p, c);
+      render(state.view);
+      toast("Jelölt kizárva a merítésből — a kizártak közt megtalálod.");
+    };
+    $("#dExcOk").onclick = go;
+    inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } };
+    $("#dExcNo").onclick = () => { host.innerHTML = ""; dExc.focus(); };
   };
   const dPr = $("#dPrio");
   if (dPr) dPr.onchange = (e) => {
@@ -1843,27 +2320,30 @@ function renderDrawer(p, c) {
     renderDrawer(p, c);
     if (state.view === "jeloltek") renderCandidatesView(p);
   };
+  // A panel műveletei is a teljes kezelést kapják: a várakozás és a hiba a
+  // panel tetején, tartósan — nem egy elszálló buborékban.
+  const panelTask = (btn, label, run, retry) => withLoading(btn, run, { into: "#drawerTask", label, retry }).catch(() => {});
   const dA = $("#dAssess");
-  if (dA) dA.onclick = (e) => withLoading(e.target, async () => {
-    const out = await api("POST", `/api/project/${p.id}/assess`, { candidateId: c.id });
+  if (dA) dA.onclick = (e) => panelTask(e.target, "Profil összegzése", async (signal) => {
+    const out = await api("POST", `/api/project/${p.id}/assess`, { candidateId: c.id }, { signal });
     p.assessments = p.assessments || {};
     p.assessments[c.id] = out;
     c.last_touched = new Date().toISOString();
     persist();
     renderDrawer(p, c);
-  });
+  }, () => { const b = $("#dAssess"); if (b) b.click(); });
   const dAt = $("#dAttract");
-  if (dAt) dAt.onclick = (e) => withLoading(e.target, async () => {
-    const out = await api("POST", `/api/project/${p.id}/attract`, { candidateId: c.id });
+  if (dAt) dAt.onclick = (e) => panelTask(e.target, "Megközelítési terv készítése", async (signal) => {
+    const out = await api("POST", `/api/project/${p.id}/attract`, { candidateId: c.id }, { signal });
     p.attraction = p.attraction || {};
     p.attraction[c.id] = out;
     c.last_touched = new Date().toISOString();
     persist();
     renderDrawer(p, c);
-  });
+  }, () => { const b = $("#dAttract"); if (b) b.click(); });
   const dD = $("#dDraft");
-  if (dD) dD.onclick = (e) => withLoading(e.target, async () => {
-    const out = await api("POST", `/api/project/${p.id}/outreach`, { candidateId: c.id });
+  if (dD) dD.onclick = (e) => panelTask(e.target, "Üzenetvázlat készítése", async (signal) => {
+    const out = await api("POST", `/api/project/${p.id}/outreach`, { candidateId: c.id }, { signal });
     p.outreach = p.outreach || {};
     p.outreach[c.id] = out;
     c.last_touched = new Date().toISOString();
@@ -1871,7 +2351,7 @@ function renderDrawer(p, c) {
     // A vázlat ott készül el, ahol dolgozol: a panel nyitva marad, csak fület vált.
     setPanelTab("uzenet");
     if (state.view === "jeloltek") render(state.view);
-  });
+  }, () => { const b = $("#dDraft"); if (b) b.click(); });
   const dT = $("#dTouch");
   if (dT) dT.onclick = () => touchCand(c.id).then(() => renderDrawer(p, c));
 }
@@ -1884,10 +2364,10 @@ function renderAttractInner(o) {
   const best = ideas[0];
   const rest = ideas.slice(1);
   return `
-    <h5>Amit tudunk <span class="ev-tag fact">Forrással igazolt</span></h5>${facts}
+    <h5>Amit tudunk ${evTag("fact")}</h5>${facts}
     ${(gr.unknowns || []).length ? `<h5 style="margin-top:8px">Amit nem tudunk</h5>${gr.unknowns.map((u) => `<div class="flag">? ${esc(u)}</div>`).join("")}` : ""}
-    ${gr.confidence ? `<div class="kpi-desc">Bizonyosság: ${esc(gr.confidence)}</div>` : ""}
-    <h5 style="margin-top:10px">Megközelítési javaslat <span class="ev-tag assume">Ellenőrizendő feltételezés</span></h5>
+    ${gr.confidence ? `<div class="card-d">Bizonyosság: ${esc(gr.confidence)}</div>` : ""}
+    <h5 style="margin-top:10px">Megközelítési javaslat ${evTag("assume")}</h5>
     ${best ? `<div class="idea idea-best"><div class="angle">${esc(best.angle || "")}</div>
       ${best.hook ? `<div class="attract-hook">Nyitómondat-ötlet: „${esc(best.hook)}”</div>` : ""}
       ${best.why_might_work ? `<div class="driver-e">Miért működhet: ${esc(best.why_might_work)}</div>` : ""}</div>` : ""}
@@ -1895,24 +2375,24 @@ function renderAttractInner(o) {
     ${o.channel ? `<h5 style="margin-top:8px">Csatorna</h5><p style="font-size:12.5px">${esc(o.channel)}</p>` : ""}
     ${o.timing ? `<h5 style="margin-top:6px">Miért lehet időszerű</h5><p style="font-size:12.5px">${esc(o.timing)}</p>` : ""}
     ${(o.risks || []).length ? `<h5 style="margin-top:6px">Kerülendő megközelítések</h5>${o.risks.map((r) => `<div class="flag">${esc(r)}</div>`).join("")}` : ""}
-    ${gr._stripped_ungrounded ? `<div class="kpi-desc" style="margin-top:6px">🛡️ ${gr._stripped_ungrounded} nem-visszavezethető állítás automatikusan kiszűrve (evidencia-földelés).</div>` : ""}`;
+    ${gr._stripped_ungrounded ? `<div class="card-d" style="margin-top:6px">🛡️ ${gr._stripped_ungrounded} nem-visszavezethető állítás automatikusan kiszűrve (evidencia-földelés).</div>` : ""}`;
 }
 
 // ── MEGKERESÉS-VÁZLAT ───────────────────────────────────────────────────
 async function makeDraft(p, id, btn) {
-  return withLoading(btn, async () => {
+  return withLoading(btn, async (signal) => {
     if (!(p.attraction || {})[id]) {
-      const at = await api("POST", `/api/project/${p.id}/attract`, { candidateId: id });
+      const at = await api("POST", `/api/project/${p.id}/attract`, { candidateId: id }, { signal });
       p.attraction = p.attraction || {};
       p.attraction[id] = at;
     }
-    const out = await api("POST", `/api/project/${p.id}/outreach`, { candidateId: id });
+    const out = await api("POST", `/api/project/${p.id}/outreach`, { candidateId: id }, { signal });
     p.outreach = p.outreach || {};
     p.outreach[id] = out;
     const cd = candById(p, id); if (cd) cd.last_touched = new Date().toISOString();
     persist();
     openPanel(id, "uzenet");
-  });
+  }, { into: "#drawerTask", label: "Megközelítési terv és üzenetvázlat készítése", retry: () => makeDraft(p, id, btn) }).catch(() => {});
 }
 // Az üzenet fül tartalma. Ugyanaz a szerkesztő, mint korábban — csak ott van,
 // ahol a jelölt többi adata is.
@@ -1924,7 +2404,7 @@ function renderMessageTab(p, id, box) {
   const at = (p.attraction || {})[id];
   if (!o) {
     box.innerHTML = `<div class="d-sec"><h5>Üzenetvázlat</h5>
-      <p class="kpi-desc" style="margin-top:0">${at
+      <p class="card-d" style="margin-top:0">${at
         ? "A megközelítési terv megvan — ebből készül a vázlat, amit te ellenőrzöl és a saját csatornádon küldesz ki."
         : "Vázlat előtt megközelítési terv kell: abból tudja az elemzés, mit érdemes mondani ennek az embernek."}</p>
       <button class="btn btn-primary" id="msgMake">${at ? "Üzenetvázlat készítése" : "Megközelítési terv és vázlat készítése"}</button>
@@ -1936,8 +2416,8 @@ function renderMessageTab(p, id, box) {
   box.innerHTML = `<div class="or-editor in-panel">
     <div class="ck-sec-head"><h3>Üzenetvázlat ${demoTag(o)} ${aiTag(s.reviewed || s.sent)}</h3>
       <span class="ck-sec-note">${esc(o.channel || "")}${o.language ? " · " + esc(o.language) : ""}</span></div>
-    <input class="subj" id="orSubj" value="${esc(o.subject || "")}" placeholder="Tárgy" />
-    <textarea class="body" id="orBody">${esc(o.body || "")}</textarea>
+    <label class="sr-only" for="orSubj">Üzenet tárgya</label><input class="subj" id="orSubj" value="${esc(o.subject || "")}" placeholder="Tárgy" />
+    <label class="sr-only" for="orBody">Üzenet szövege</label><textarea class="body" id="orBody">${esc(o.body || "")}</textarea>
     ${(o.why_this_works || []).length ? `<details class="or-why"><summary>A javaslat indoklása</summary>${list(o.why_this_works)}</details>` : ""}
     <div class="row" style="margin-top:12px">
       ${!s.reviewed && !s.sent ? `<button class="btn btn-primary" id="orApprove">Jóváhagyva ✓</button>` : ""}
@@ -1985,10 +2465,10 @@ function renderMessageTab(p, id, box) {
   }));
   const rs = $("#orReset");
   if (rs) rs.onclick = async () => { await setOrStatus(p, id, { status: "reset" }); refresh(); };
-  $("#orArt14").onclick = (e) => withLoading(e.target, async () => {
-    const a = await api("POST", `/api/project/${p.id}/art14`, { candidateId: id });
+  $("#orArt14").onclick = (e) => withLoading(e.target, async (signal) => {
+    const a = await api("POST", `/api/project/${p.id}/art14`, { candidateId: id }, { signal });
     $("#art14Slot").innerHTML = `<div class="mail" style="margin-top:10px"><div class="mail-head"><span class="mail-subj">${esc(a.subject)}</span><span>${esc(a.must_send_within)}</span></div><div class="mail-body">${esc(a.body)}</div></div><div class="note">${esc(a.note)}</div>`;
-  });
+  }, { into: "#drawerTask", label: "GDPR Art. 14 értesítő készítése" }).catch(() => {});
 }
 // A szerkesztőmező tartalma `change`-re (fókuszvesztéskor) mentődik. Fülváltásnál
 // és újrarendernél ez nem mindig ér oda — ezért minden ilyen előtt kézzel mentünk.
@@ -2008,7 +2488,7 @@ async function setOrStatus(p, id, body) {
     if (r.status) p.outreach_status[id] = r.status; else delete p.outreach_status[id];
     const cd = candById(p, id); if (cd) cd.last_touched = new Date().toISOString();
     persist();
-  } catch (e) { toast("Hiba: " + e.message); }
+  } catch (e) { const i = errorInfo(e); toast(i.title + " " + i.detail, true); }
 }
 
 // ── ÜGYFÉL ÉS INTERJÚ ───────────────────────────────────────────────────
@@ -2057,33 +2537,67 @@ function renderResults(p) {
   const age = daysSince(p.created_at);
   const shortDays = (p.first_shortlist_at && p.created_at) ? Math.floor((new Date(p.first_shortlist_at) - new Date(p.created_at)) / 86400000) : null;
   const inPipeline = pipelineRows(p).rows.length;
+  /* A mérés ugyanazt a formát kapja, mint a márkajel és a tábla: szűkülő
+     sávok futnak a korall döntési pontba. Eddig három csupasz egész szám állt
+     ott, ahol a termék egész mérési érvének kellene lennie — most a lépcső
+     maga mondja el, hol fogy el a merítés, és minden fokon ott a valódi
+     hányad. A drafts→sent lépcső szándékosan látszik: a legnagyobb szivárgás
+     általában a megírt, de soha ki nem küldött vázlat. */
+  const fi = funnelInfo(p);
+  const drafts = Object.keys(p.outreach || {}).filter((k) => actIds.has(k)).length;
+  const chain = [
+    { n: fi.felkutatva, lbl: "felkutatva", sub: "a merítésben" },
+    { n: fi.prioritasos, lbl: "prioritásos", sub: "A vagy B besorolás" },
+    { n: drafts, lbl: "vázlat kész", sub: "megírt megkeresés" },
+    { n: sent, lbl: "kiküldve", sub: "te rögzítetted" },
+    { n: replied, lbl: "válaszolt", sub: respRate == null ? "—" : respRate + "% a kiküldöttekből" },
+  ];
+  const max = Math.max(1, fi.felkutatva, drafts);
+  const step = (s, i) => {
+    const prev = i ? chain[i - 1].n : null;
+    const drop = prev != null && prev > 0 ? Math.round((1 - s.n / prev) * 100) : null;
+    return `<div class="rstep">
+      <div class="rstep-n">${s.n}</div>
+      <div class="rstep-track"><span class="rstep-bar" style="width:${Math.round(Math.min(1, s.n / max) * 100)}%;height:${13 - i * 2}px"></span></div>
+      <div class="rstep-l">${esc(s.lbl)}</div>
+      <div class="rstep-s">${esc(s.sub)}${drop != null && drop > 0 ? ` · −${drop}%` : ""}</div>
+    </div>`;
+  };
   v.innerHTML = `<div class="stage">
     <div class="stage-head"><h2>Eredmények</h2>
-      <p class="stage-sub">A számok a Megkeresések nézetben rögzített kiküldésekből és válaszokból épülnek — a rendszer nem küld semmit, kitalált számot nem mutatunk.</p></div>
-    <div class="res-grid">
-      <div class="res-card"><div class="res-num">${sent}</div><div class="res-lbl">Kiküldött megkeresés</div><div class="res-sub">${Object.keys(p.outreach || {}).filter((k) => actIds.has(k)).length} vázlatból</div></div>
-      <div class="res-card"><div class="res-num acc">${respRate == null ? "—" : respRate + "%"}</div><div class="res-lbl">Válaszadási arány</div><div class="res-sub">${replied}/${sent || 0} kiküldött megkeresésre érkezett válasz</div></div>
-      <div class="res-card"><div class="res-num acc">${posRate == null ? "—" : posRate + "%"}</div><div class="res-lbl">Pozitív válaszok aránya</div><div class="res-sub">${positive}/${sent || 0} — a semleges válasz nem számít pozitívnak</div></div>
+      <p class="stage-sub">A számok a te rögzítéseidből épülnek — a rendszer nem küld semmit, kitalált számot nem mutatunk.</p></div>
+
+    <div class="rchain">${chain.map(step).join("")}
+      <div class="rstep rstep-end">
+        <div class="rstep-n acc">${positive}</div>
+        <span class="fdot${positive ? " full" : ""}"></span>
+        <div class="rstep-l">pozitív</div>
+        <div class="rstep-s">${posRate == null ? "—" : posRate + "% a kiküldöttekből"}</div>
+      </div>
     </div>
-    <div class="res-grid" style="margin-top:16px">
+    ${sent === 0 ? `<div class="ov-empty sm" style="margin-top:14px">Amint rögzíted az első kiküldést, itt jelenik meg a válaszarány és az összevetés a korábbi gyakorlatoddal.</div>` : ""}
+
+    <div class="res-grid" style="margin-top:20px">
       <div class="res-card"><div class="cov-label">Korábbi kézi válaszarány</div>
-        <div class="proof-baseline-row"><input id="resBaseline" class="brief-line" type="number" min="0" max="100" placeholder="%" value="${base == null ? "" : base}" style="max-width:100px"><button class="btn" id="resBaselineSave">Mentés</button></div>
-        <div class="kpi-desc">Ehhez méri magát a keresés (önbevallás vagy korábbi ATS-adat).${delta != null ? ` Eltérés most: <b>${delta >= 0 ? "+" : ""}${delta} százalékpont</b>.` : ""}</div>
+        <div class="proof-baseline-row">
+          <label class="sr-only" for="resBaseline">Korábbi kézi válaszarány százalékban</label>
+          <input id="resBaseline" class="brief-line" type="number" min="0" max="100" placeholder="%" value="${base == null ? "" : base}" style="max-width:100px"><button class="btn" id="resBaselineSave">Mentés</button></div>
+        <div class="card-d">Ehhez méri magát a keresés (önbevallás vagy korábbi ATS-adat).${delta != null ? ` Eltérés most: <b class="${delta >= 0 ? "d-pos" : "d-neg"}">${delta >= 0 ? "+" : ""}${delta} százalékpont</b>.` : ""}</div>
       </div>
       <div class="res-card"><div class="cov-label">Idő az első shortlistig</div>
         ${shortDays != null ? `<div class="res-num" style="font-size:22px">${shortDays} nap</div><button class="btn btn-ghost" id="resShortClear" style="margin-top:6px">visszavonás</button>`
           : `<div class="res-sub" style="margin-top:4px">A megbízás ${age == null ? "?" : age} napja fut.</div><button class="btn" id="resShortDone" style="margin-top:8px">Shortlist kész — rögzítés</button>`}
       </div>
-      <div class="res-card"><div class="res-num">${inPipeline}</div><div class="res-lbl">Folyamatban lévő jelölt</div><div class="res-sub">A/B prioritással</div></div>
+      <div class="res-card"><div class="res-num">${inPipeline}</div><div class="res-lbl">Folyamatban lévő jelölt</div><div class="res-sub">A/B prioritással${fi.kizart ? ` · ${fi.kizart} kizárva a merítésből` : ""}</div></div>
     </div>
   </div>`;
-  $("#resBaselineSave").onclick = async () => {
-    const r = await api("POST", `/api/project/${p.id}/baseline`, { rate: $("#resBaseline").value });
+  $("#resBaselineSave").onclick = (e) => withLoading(e.target, async (signal) => {
+    const r = await api("POST", `/api/project/${p.id}/baseline`, { rate: $("#resBaseline").value }, { signal });
     p.baseline_response_rate = r.baseline_response_rate;
     persist();
     renderResults(p);
     toast("Kiinduló érték mentve.");
-  };
+  }).catch(() => {});
   const sd = $("#resShortDone");
   if (sd) sd.onclick = async () => {
     const r = await api("POST", `/api/project/${p.id}/shortlist-done`, {});
@@ -2114,22 +2628,22 @@ function renderNotes(p) {
   v.innerHTML = `
     <div class="d-sec"><h5>Új jegyzet</h5>
       <div class="row">
-        <select id="noteKind"><option value="note">megbízás</option><option value="candidate">jelölt</option></select>
-        <select id="noteCand" class="hidden">${cands.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select>
+        <label class="sr-only" for="noteKind">Jegyzet típusa</label><select id="noteKind"><option value="note">megbízás</option><option value="candidate">jelölt</option></select>
+        <label class="sr-only" for="noteCand">Melyik jelölthöz</label><select id="noteCand" class="hidden">${cands.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select>
       </div>
       <div class="row" style="margin-top:8px">
-        <input id="noteInput" class="brief-line" placeholder="Jegyzet…" />
+        <label class="sr-only" for="noteInput">Jegyzet szövege</label><input id="noteInput" class="brief-line" placeholder="Jegyzet…" />
         <button id="noteSave" class="btn btn-primary">Mentés</button>
       </div>
     </div>
     <div class="d-sec"><h5>Módszertani segítség</h5>
-      <p class="kpi-desc" style="margin-top:0">Írd le, hol tartasz vagy hol akadtál el — javaslatot kapsz a következő lépésre.</p>
-      <div class="row"><input id="coachCtx" class="brief-line" placeholder="Mit csináltál / hol akadtál el? (opcionális)" />
+      <p class="card-d" style="margin-top:0">Írd le, hol tartasz vagy hol akadtál el — javaslatot kapsz a következő lépésre.</p>
+      <div class="row"><label class="sr-only" for="coachCtx">Hol tartasz vagy hol akadtál el</label><input id="coachCtx" class="brief-line" placeholder="Mit csináltál / hol akadtál el? (opcionális)" />
         <button id="coachBtn" class="btn">Javaslat kérése</button></div>
       <div id="coachOut" class="out"></div>
     </div>
     <div class="d-sec"><h5>Előzmény
-        <select id="noteFilter" style="margin-left:auto"><option value="">minden</option><option value="note" ${f === "note" ? "selected" : ""}>megbízás</option><option value="candidate" ${f === "candidate" ? "selected" : ""}>jelölt</option></select>
+        <select id="noteFilter" aria-label="Előzmény szűrése" style="margin-left:auto"><option value="">minden</option><option value="note" ${f === "note" ? "selected" : ""}>megbízás</option><option value="candidate" ${f === "candidate" ? "selected" : ""}>jelölt</option></select>
       </h5>
       ${renderNoteList(shown, { candidateName: nameOf, empty: "Még nincs jegyzet ebben a megbízásban." })}
     </div>`;
@@ -2146,114 +2660,161 @@ function renderNotes(p) {
     renderNotes(p);
     toast("Jegyzet mentve.");
   };
-  $("#coachBtn").onclick = (e) => withLoading(e.target, async () => {
-    const out = await api("POST", `/api/project/${p.id}/coach`, { context: $("#coachCtx").value });
+  $("#coachBtn").onclick = (e) => withLoading(e.target, async (signal) => {
+    const out = await api("POST", `/api/project/${p.id}/coach`, { context: $("#coachCtx").value }, { signal });
     p.coach_notes = p.coach_notes || [];
     p.coach_notes.push({ ts: new Date().toISOString(), ...out });
     persist();
     renderCoach(out);
-  });
+  }, { into: "#coachOut", label: "Módszertani javaslat kérése" }).catch(() => {});
 }
 
 // ── STATIKUS GOMBOK (pozíció / célpiac / ügyfél nézetek) ────────────────
-$("#intakeBtn").onclick = (e) => needEngagement() && withLoading(e.target, async () => {
-  const p = state.project;
+$("#intakeBtn").onclick = (e) => needEngagement() && runIntake(e.target);
+function runIntake(btn) {
+  const p = state.project, pid = p.id;
   // Az újraelemzés felülírja a véglegesített briefet — kézi szerkesztésnél kérdezünk.
   if (p.brief_final && briefIsEdited(p) && !confirm("Már van szerkesztett véglegesített briefed. Az új elemzés felülírja. Folytatod?")) return;
   p.brief_raw = $("#briefInput").value;
-  const out = await api("POST", `/api/project/${p.id}/intake`, { brief: p.brief_raw });
-  p.intake = out;
-  p.intake_review = null;
-  p.brief_final = null;
-  persist();
-  renderIntake(p);
-  toast("Elemzés kész — szerkeszd és véglegesítsd a briefet.");
-});
-$("#queryBtn").onclick = (e) => needEngagement() && withLoading(e.target, async () => {
-  const p = state.project;
-  const q = await api("POST", `/api/project/${p.id}/query`, { brief: finalBriefText(p), must_haves: (p.brief_final || {}).must_haves });
-  const had = !!p.query;
-  // A frissítés SOHA nem törli a kézzel felvett kategóriákat — egyesít.
-  p.query = mergeQueryPlan(p.query, q);
-  // Az ügyfél neve a kizárási listát vezérli, nem a terv szövegét.
-  persist();
-  renderCelpiac(p);
-  renderEngHeader(p);
-  toast(had ? "Keresési terv frissítve — a kézi módosításaid megmaradtak." : "Keresési terv elkészült — szerkeszd szabadon.");
-});
-$("#queryResetBtn").onclick = (e) => needEngagement() && withLoading(e.target, async () => {
-  const p = state.project;
+  return withLoading(btn, async (signal) => {
+    const out = await api("POST", `/api/project/${pid}/intake`, { brief: p.brief_raw }, { signal });
+    if (!stillOn(pid)) return;
+    p.intake = out;
+    p.intake_review = null;
+    p.brief_final = null;
+    persist();
+    renderIntake(p);
+    toast("Elemzés kész — szerkeszd és véglegesítsd a briefet.");
+  }, { into: "#intakeOut", label: "A brief elemzése", retry: () => runIntake(btn) }).catch(() => {});
+}
+
+$("#queryBtn").onclick = (e) => needEngagement() && runQuery(e.target);
+function runQuery(btn) {
+  const p = state.project, pid = p.id;
+  return withLoading(btn, async (signal) => {
+    const q = await api("POST", `/api/project/${pid}/query`, { brief: finalBriefText(p), must_haves: (p.brief_final || {}).must_haves }, { signal });
+    if (!stillOn(pid)) return;
+    const had = !!p.query;
+    // A frissítés SOHA nem törli a kézzel felvett kategóriákat — egyesít.
+    p.query = mergeQueryPlan(p.query, q);
+    persist();
+    renderCelpiac(p);
+    renderEngHeader(p);
+    toast(had ? "Keresési terv frissítve — a kézi módosításaid megmaradtak." : "Keresési terv elkészült — szerkeszd szabadon.");
+  }, { into: "#queryOut", label: "Keresési terv készítése", retry: () => runQuery(btn) }).catch(() => {});
+}
+
+$("#queryResetBtn").onclick = (e) => needEngagement() && runQueryReset(e.target);
+function runQueryReset(btn) {
+  const p = state.project, pid = p.id;
   if (p.query && !confirm("Új terv nulláról: a kézzel felvett kategóriáid elvesznek. Folytatod?")) return;
-  p.query = await api("POST", `/api/project/${p.id}/query`, { brief: finalBriefText(p) });
-  persist();
-  renderCelpiac(p);
-  renderEngHeader(p);
-  toast("Új keresési terv készült.");
-});
-$("#talentBtn").onclick = (e) => needEngagement() && withLoading(e.target, async () => {
-  const p = state.project;
-  const t = await api("POST", `/api/project/${p.id}/talent-map`);
-  p.talent_map = t;
-  persist();
-  renderCelpiac(p);
-});
-$("#discoverBtn").onclick = (e) => needEngagement() && withLoading(e.target, async () => {
-  const p = state.project;
-  const src = $("#sourceSel").value;
+  return withLoading(btn, async (signal) => {
+    const q = await api("POST", `/api/project/${pid}/query`, { brief: finalBriefText(p) }, { signal });
+    if (!stillOn(pid)) return;
+    p.query = q;
+    persist();
+    renderCelpiac(p);
+    renderEngHeader(p);
+    toast("Új keresési terv készült.");
+  }, { into: "#queryOut", label: "Új keresési terv készítése", retry: () => runQueryReset(btn) }).catch(() => {});
+}
+
+$("#talentBtn").onclick = (e) => needEngagement() && runTalent(e.target);
+function runTalent(btn) {
+  const p = state.project, pid = p.id;
+  return withLoading(btn, async (signal) => {
+    const t = await api("POST", `/api/project/${pid}/talent-map`, null, { signal });
+    if (!stillOn(pid)) return;
+    p.talent_map = t;
+    persist();
+    renderCelpiac(p);
+    toast("Célpiac-térkép kész.");
+  }, { into: "#talentOut", label: "Célpiac-térkép készítése", retry: () => runTalent(btn) }).catch(() => {});
+}
+
+/* A jelöltkutatás a leglassabb lépés, és a Vercel Hobby 60 mp-es plafonja
+   alatt az „automatikus" élő keresés rendszeresen 504-et adott. A hibakártya
+   ezért nemcsak megmondja az okot, hanem fel is kínálja az egyetlen működő
+   kijáratot — ugyanazt, amit a README javasol: váltás mintaadatokra. */
+$("#discoverBtn").onclick = (e) => needEngagement() && runDiscover(e.target);
+function runDiscover(btn, forceSource) {
+  const p = state.project, pid = p.id;
+  const src = forceSource || $("#sourceSel").value;
   const wantsLive = src !== "synthetic" && state.status && state.status.reach_live;
   if (wantsLive && !(p.query && (p.query.firecrawl_search_queries || []).length)) {
-    toast("Az élő kutatáshoz előbb készíts keresési tervet.");
+    toast("Az élő kutatáshoz előbb készíts keresési tervet.", true);
     return;
   }
-  const out = await api("POST", `/api/project/${p.id}/discover`, { source: src });
-  const existing = p.candidates || [];
-  if (!existing.length) {
-    p.candidates = out.candidates;
-    p.discover_note = out.note;
-  } else {
-    // Új futtatás nem írja felül a korábbi listát: hozzáadás + jelölés.
-    const norm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
-    const seen = new Set(existing.map((c) => norm(c.name)));
-    const ids = new Set(existing.map((c) => c.id));
-    let added = 0, dup = 0;
-    for (const n of out.candidates || []) {
-      if (seen.has(norm(n.name))) { dup++; continue; }
-      let id = n.id;
-      if (ids.has(id)) { let i = 1; while (ids.has(`${id}-${i}`)) i++; id = `${id}-${i}`; }
-      existing.push({ ...n, id, is_new: true });
-      ids.add(id);
-      seen.add(norm(n.name));
-      added++;
+  if (forceSource) { const s = $("#sourceSel"); if (s) s.value = forceSource; }
+  return withLoading(btn, async (signal) => {
+    const out = await api("POST", `/api/project/${pid}/discover`, { source: src }, { signal });
+    if (!stillOn(pid)) return;
+    const existing = p.candidates || [];
+    if (!existing.length) {
+      p.candidates = out.candidates;
+      p.discover_note = out.note;
+    } else {
+      // Új futtatás nem írja felül a korábbi listát: hozzáadás + jelölés.
+      const norm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
+      const seen = new Set(existing.map((c) => norm(c.name)));
+      const ids = new Set(existing.map((c) => c.id));
+      let added = 0, dup = 0;
+      for (const n of out.candidates || []) {
+        if (seen.has(norm(n.name))) { dup++; continue; }
+        let id = n.id;
+        if (ids.has(id)) { let i = 1; while (ids.has(`${id}-${i}`)) i++; id = `${id}-${i}`; }
+        existing.push({ ...n, id, is_new: true });
+        ids.add(id);
+        seen.add(norm(n.name));
+        added++;
+      }
+      p.candidates = existing;
+      p.discover_note = `${out.note} · Új futtatás: ${added} új jelölt hozzáadva, ${dup} már ismert (nem írtuk felül).`;
     }
-    p.candidates = existing;
-    p.discover_note = `${out.note} · Új futtatás: ${added} új jelölt hozzáadva, ${dup} már ismert (nem írtuk felül).`;
-  }
-  p.discover_source = out.source;
-  if (p.status === "Előkészítés") p.status = "Kutatás folyamatban";
-  // Az ügyfél saját (volt) emberei nem kerülnek a listára — de nem is tűnnek el
-  // nyomtalanul: külön sávra kerülnek, indoklással, visszahozhatóan.
-  const blocked = excludedCandidates(p).length;
-  if (blocked) p.discover_note += ` · ${blocked} találat kizárva a merítésből (ügyfél jelenlegi/volt munkatársa vagy off-limits cég).`;
-  persist();
-  toast(blocked
-    ? `${(out.candidates || []).length} találat · ${blocked} kizárva (ügyfél saját emberei).`
-    : `${(out.candidates || []).length} találat feldolgozva.`);
-  showView("jeloltek");
-});
-$("#advisoryBtn").onclick = (e) => needEngagement() && withLoading(e.target, async () => {
-  const p = state.project;
-  const a = await api("POST", `/api/project/${p.id}/advisory`);
-  p.advisory = a;
-  persist();
-  renderAdvisory(a);
-});
-$("#interviewBtn").onclick = (e) => needEngagement() && withLoading(e.target, async () => {
-  const p = state.project;
-  const iv = await api("POST", `/api/project/${p.id}/interview`);
-  p.interview = iv;
-  persist();
-  renderInterview(iv);
-});
+    p.discover_source = out.source;
+    if (p.status === "Előkészítés") p.status = "Kutatás folyamatban";
+    // Az ügyfél saját (volt) emberei nem kerülnek a listára — de nem is tűnnek el
+    // nyomtalanul: külön sávra kerülnek, indoklással, visszahozhatóan.
+    const blocked = excludedCandidates(p).length;
+    if (blocked) p.discover_note += ` · ${blocked} találat kizárva a merítésből (ügyfél jelenlegi/volt munkatársa vagy off-limits cég).`;
+    persist();
+    toast(blocked
+      ? `${(out.candidates || []).length} találat · ${blocked} kizárva (ügyfél saját emberei).`
+      : `${(out.candidates || []).length} találat feldolgozva.`);
+    showView("jeloltek");
+  }, {
+    into: "#discoverNote",
+    label: src === "synthetic" ? "Jelöltkutatás mintaadatokon" : "Jelöltkutatás nyilvános webes forrásokon",
+    retry: () => runDiscover(btn, src),
+    alt: { label: "Váltás mintaadatokra", run: () => runDiscover(btn, "synthetic") },
+  }).catch(() => {});
+}
+
+$("#advisoryBtn").onclick = (e) => needEngagement() && runAdvisory(e.target);
+function runAdvisory(btn) {
+  const p = state.project, pid = p.id;
+  return withLoading(btn, async (signal) => {
+    const a = await api("POST", `/api/project/${pid}/advisory`, null, { signal });
+    if (!stillOn(pid)) return;
+    p.advisory = a;
+    persist();
+    renderAdvisory(a);
+    toast("Egyeztetési javaslatok készen.");
+  }, { into: "#advisoryOut", label: "Egyeztetési javaslatok készítése", retry: () => runAdvisory(btn) }).catch(() => {});
+}
+
+$("#interviewBtn").onclick = (e) => needEngagement() && runInterview(e.target);
+function runInterview(btn) {
+  const p = state.project, pid = p.id;
+  return withLoading(btn, async (signal) => {
+    const iv = await api("POST", `/api/project/${pid}/interview`, null, { signal });
+    if (!stillOn(pid)) return;
+    p.interview = iv;
+    persist();
+    renderInterview(iv);
+    toast("Interjúterv kész.");
+  }, { into: "#interviewOut", label: "Interjúterv készítése", retry: () => runInterview(btn) }).catch(() => {});
+}
 
 // ── GLOBÁLIS ────────────────────────────────────────────────────────────
 $("#newEngBtn").onclick = () => { if (state.view !== "home") closeEngagement(); openNewEngForm(); };
@@ -2282,8 +2843,9 @@ function closeSearchResults() {
   if (!box) return;
   box.classList.add("hidden");
   box.innerHTML = "";
+  srActive = -1;
   const inp = $("#globalSearch");
-  if (inp) inp.setAttribute("aria-expanded", "false");
+  if (inp) { inp.setAttribute("aria-expanded", "false"); inp.removeAttribute("aria-activedescendant"); }
 }
 function renderSearchResults(q) {
   const box = $("#searchResults");
@@ -2293,9 +2855,9 @@ function renderSearchResults(q) {
   const hits = (p.candidates || []).filter((x) =>
     `${x.name} ${x.headline} ${x.current_company} ${x.location}`.toLowerCase().includes(q)).slice(0, 8);
   box.innerHTML = hits.length
-    ? hits.map((x) => {
+    ? hits.map((x, i) => {
         const t = effTier(p, x.id);
-        return `<button class="sr-row" role="option" data-id="${esc(x.id)}">
+        return `<button class="sr-row" role="option" id="sr-${i}" aria-selected="false" tabindex="-1" data-id="${esc(x.id)}">
           <span class="sr-tier">${esc(t || "—")}</span>
           <span class="sr-main"><b>${esc(x.name)}</b><span class="sr-sub">${esc([x.headline, x.current_company].filter(Boolean).join(" · "))}</span></span>
           <span class="sr-next">${esc(candNext(p, x))}</span>
@@ -2304,7 +2866,22 @@ function renderSearchResults(q) {
     : `<div class="sr-empty">Nincs találat erre: „${esc(q)}”</div>`;
   box.classList.remove("hidden");
   $("#globalSearch").setAttribute("aria-expanded", "true");
+  srActive = -1;
   $$(".sr-row", box).forEach((b) => (b.onclick = () => openPanel(b.dataset.id)));
+  announce(hits.length ? `${hits.length} találat` : "Nincs találat");
+}
+/* A kereső combobox-nak vallotta magát aria-activedescendant és nyílbillentyű
+   nélkül: a felhasználó látta a nyolc találatot, de csak egérrel érte el. */
+let srActive = -1;
+function srMove(d) {
+  const rows = $$("#searchResults .sr-row");
+  if (!rows.length) return;
+  rows.forEach((r) => r.setAttribute("aria-selected", "false"));
+  srActive = (srActive + d + rows.length + (srActive < 0 && d < 0 ? 1 : 0)) % rows.length;
+  const cur = rows[srActive];
+  cur.setAttribute("aria-selected", "true");
+  cur.scrollIntoView({ block: "nearest" });
+  $("#globalSearch").setAttribute("aria-activedescendant", cur.id);
 }
 $("#globalSearch").oninput = (e) => {
   const q = e.target.value.trim().toLowerCase();
@@ -2313,11 +2890,28 @@ $("#globalSearch").oninput = (e) => {
   if (state.view === "jeloltek") { closeSearchResults(); renderCandidatesView(state.project); }
   else renderSearchResults(q);
 };
+$("#globalSearch").onkeydown = (e) => {
+  const open = !$("#searchResults").classList.contains("hidden");
+  if (!open) return;
+  if (e.key === "ArrowDown") { e.preventDefault(); srMove(1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); srMove(-1); }
+  else if (e.key === "Enter") {
+    const rows = $$("#searchResults .sr-row");
+    const cur = rows[srActive] || rows[0];
+    if (cur) { e.preventDefault(); openPanel(cur.dataset.id); }
+  }
+};
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".search-wrap")) closeSearchResults();
+  // A ⋯ menü eddig nyitva maradt, ha máshova kattintottál — abszolút
+  // pozicionálva, rá arra, ami alatta volt.
+  $$("details.stepmenu[open]").forEach((d) => { if (!d.contains(e.target)) d.open = false; });
 });
 document.addEventListener("keydown", (e) => {
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f" && state.project) {
+  // ⌘K, nem ⌘F. A ⌘F elrablása egy szövegsűrű képernyőn elvette a böngésző
+  // find-in-page-ét, miközben a beépített kereső csak jelöltmezőkre illeszt —
+  // a briefben, a tervben és az üzenetvázlatban nem talál semmit.
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k" && state.project) {
     e.preventDefault();
     $("#globalSearch").focus();
   }
@@ -2326,6 +2920,8 @@ document.addEventListener("keydown", (e) => {
     state.notesOpen ? closeNotesDrawer() : openNotesDrawer();
   }
   if (e.key === "Escape") {
+    const om = $$("details.stepmenu[open]");
+    if (om.length) { om.forEach((d) => (d.open = false)); return; }
     if (!$("#searchResults").classList.contains("hidden")) closeSearchResults();
     else if (state.moreOpen) closeMoreSheet();
     else if (state.notesOpen) closeNotesDrawer();
@@ -2350,15 +2946,27 @@ if (typeof matchMedia === "function") {
   else if (mq.addListener) mq.addListener(onChange);
 }
 
-// Init — a visszatérő felhasználót a legutóbbi állapothoz visszük.
+// A címsor a navigáció forrása: megosztott link, könyvjelző és a Vissza gomb
+// mind ugyanoda vezet. A böngésző-előzmény már nem csak a panelt zárja.
+window.addEventListener("hashchange", () => {
+  if (hashLock) return;
+  const h = parseHash();
+  if (!h) { if (state.projectId) closeEngagement(); return; }
+  if (h.id !== state.projectId) { if (lsGet(h.id)) openEngagement(h.id, h.view); return; }
+  if (h.view !== state.view) showView(h.view);
+});
+
+// Init — a link, aztán a legutóbbi állapot. A megosztott cím erősebb, mint az
+// eltárolt nézet: ha valaki kap egy linket, azt kell látnia, amit küldtek neki.
 (async () => {
+  watchExternalWrites();
   await loadStatus();
   const ui = loadUi();
   if (ui.homeFilter) state.homeFilter = ui.homeFilter;
   if (ui.candView === "list" || ui.candView === "board") state.candView = ui.candView;
-  if (ui.projectId && lsGet(ui.projectId)) {
-    openEngagement(ui.projectId, ui.view && ui.view !== "home" ? ui.view : "attekintes");
-  } else {
-    showView("home");
-  }
+  const h = parseHash();
+  if (h && lsGet(h.id)) openEngagement(h.id, h.view);
+  else if (h) { toast("Ez a megbízás nem ebben a böngészőben van elmentve.", true); showView("home"); }
+  else if (ui.projectId && lsGet(ui.projectId)) openEngagement(ui.projectId, ui.view && ui.view !== "home" ? ui.view : "attekintes");
+  else showView("home");
 })();

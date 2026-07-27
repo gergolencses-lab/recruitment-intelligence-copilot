@@ -1,6 +1,24 @@
-# Design tokens — Meridian "Reports and Analytics" (forrás → RIC)
+# Design tokens — Meridian "Reports and Analytics" (TÖRTÉNETI FORRÁS)
 
-A `Healthcare Reports Dashboard.dc.html`-ből kinyert design-nyelv. Ez az igazság-forrás a re-skinhez.
+> ⚠️ **Ez a dokumentum már NEM az igazság-forrás.** A JEL élő design-nyelvét a
+> [`DESIGN.md`](../DESIGN.md) írja le; a tokenek a `app/public/styles.css`
+> `:root` blokkjában élnek.
+>
+> Ez a fájl annak a healthcare-dashboard sablonnak a kivonata, amiből a
+> felület első váza származott. Megőrizzük, mert megmagyarázza, honnan jöttek
+> bizonyos méretek — de **anti-referenciaként**, nem mintaként: a 2026-07-27-i
+> design-átvizsgálás azt találta, hogy a váz méretei egy az egyben átjöttek
+> (sidebar 232px, nav item 9px/11 gap/13.5px, topbar 13px 32px, search pill
+> 320px + ⌘F chip, oldalcím 24/700/-0.01em), miközben a stíluslap ~28%-a
+> olyan Meridian-komponenst írt le, amit semmilyen kódút nem bocsátott ki.
+>
+> **Az alábbi „RIC-adaptáció" fejezet soha nem épült meg** (fél-donut gauge,
+> stepped vonal, radar, sűrű oszlopok). A helyére a tölcsér-motívum került:
+> szűkülő menta sávok egy korall döntési pontba — lásd `DESIGN.md`. A hozzá
+> tartozó holt CSS (`.kpi-*`, `.chart-*`, `.gauge-*`, `.radar-*`, `.bars`,
+> `.ck-status*`, `.proof-*`, `.act-*`, `.stuck-*`) 2026-07-27-én törölve lett.
+
+A `Healthcare Reports Dashboard.dc.html`-ből kinyert design-nyelv.
 
 ## Paletta (oklch)
 | Szerep | Érték |

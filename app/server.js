@@ -11,6 +11,9 @@ const app = express();
 app.set("trust proxy", true); // Render/hosting proxy mögött a valódi kliens-IP az X-Forwarded-For-ból
 app.use(express.json({ limit: "4mb" })); // a kliens a teljes projekt-állapotot küldi (stateless szerver)
 app.use(express.static(path.join(__dirname, "public")));
+// A folyamatábra eddig létezett, jó volt, és sehonnan nem lehetett elérni az
+// appból — mert a statikus kiszolgálás csak az app/public-ra nézett.
+app.use("/docs", express.static(path.join(__dirname, "../product-docs")));
 
 // ── Egyszerű, függőség nélküli rate-limit a publikus éles módhoz ──
 // Védi a burn API-kulcsokat: korlátozza, hány drága (API-t hívó) POST-ot

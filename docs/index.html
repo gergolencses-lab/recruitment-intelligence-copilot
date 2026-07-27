@@ -3,11 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="JEL — fejvadász-copilot senior tech és CEE szerepekre. Brieftisztázás, célpiac-térkép, jelöltkutatás és megkeresés egy munkatérben, evidencia-alapon." />
   <title>JEL — Jelöltből jó döntés</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23263653'/><g stroke-linecap='round' stroke-width='7' fill='none'><path d='M14 17 L38 27' stroke='%23FF5A5F'/><path d='M14 32 L36 32' stroke='%2320CFA8'/><path d='M14 47 L38 37' stroke='%2320CFA8'/></g><circle cx='48' cy='32' r='5.5' fill='%23FF5A5F'/></svg>" />
 </head>
 <body>
+  <a href="#scroll" class="skip-link">Ugrás a tartalomra</a>
   <div class="shell">
     <!-- ── SIDEBAR ── -->
     <aside class="sidebar">
@@ -19,13 +21,13 @@
         </div>
       </div>
 
-      <nav class="steps">
+      <nav class="steps" aria-label="Munkatér">
         <a href="#" class="step" data-view="home"><span class="dot"></span>Megbízások</a>
       </nav>
 
       <div id="engNav" class="hidden">
         <div class="side-label" id="engNavLabel">Megbízás</div>
-        <nav class="steps" id="engSteps"></nav>
+        <nav class="steps" id="engSteps" aria-label="Megbízás lépései"></nav>
         <button class="side-notes" id="notesOpen" title="Napló (⌘J)">Napló megnyitása</button>
       </div>
 
@@ -33,6 +35,7 @@
         <div class="badges badges-side" id="badges"><span class="badge badge-mut">állapot…</span></div>
         <div id="modelLine" class="mut"></div>
         <div>Az elemzés és az adatkezelés szerver-oldalon fut; a megbízások ebben a böngészőben tárolódnak.</div>
+        <a class="side-doc" href="https://github.com/gergolencses-lab/recruitment-intelligence-copilot/blob/main/product-docs/folyamatabra.html" target="_blank" rel="noopener">Hogyan működik a folyamat? ↗</a>
       </div>
     </aside>
 
@@ -41,25 +44,24 @@
       <header class="topbar">
         <div class="search-wrap">
           <div class="search-pill">
-            <input id="globalSearch" placeholder="Jelölt keresése…" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="searchResults" />
-            <span class="kbd">⌘ F</span>
+            <input id="globalSearch" placeholder="Jelölt keresése…" autocomplete="off" aria-label="Jelölt keresése" role="combobox" aria-expanded="false" aria-controls="searchResults" aria-autocomplete="list" />
+            <span class="kbd" aria-hidden="true">⌘ K</span>
           </div>
           <div id="searchResults" class="search-results hidden" role="listbox" aria-label="Találatok"></div>
         </div>
         <div class="top-right">
-          <div class="badges" id="badgesTop"></div>
+          <div id="topEng" class="top-eng"></div>
         </div>
       </header>
 
-      <div id="subNav" class="subnav" role="tablist" aria-label="Lépések a fázison belül"></div>
+      <nav id="subNav" class="subnav" aria-label="Lépések a fázison belül"></nav>
 
-      <div class="scroll" id="scroll">
+      <div class="scroll" id="scroll" tabindex="-1">
 
         <!-- ── MEGBÍZÁSOK (nyitóképernyő) ── -->
         <section id="view-home" class="view">
           <div class="page-head">
             <div>
-              <div class="crumbs">Munkatér</div>
               <h1>Megbízások</h1>
             </div>
             <div class="head-actions">
@@ -78,20 +80,19 @@
           <section id="view-attekintes" class="view eng-view"></section>
 
           <section id="view-pozicio" class="view eng-view">
-            <div class="poz-grid">
-              <div class="stage">
-                <div class="stage-head"><h2>Brief</h2>
-                  <p class="stage-sub">Illeszd be a hiring manager nyers briefjét. Az elemzés eredménye javaslat — te hagyod jóvá vagy szerkeszted.</p></div>
-                <textarea id="briefInput" class="brief" placeholder="Illeszd be a nyers briefet ide…"></textarea>
-                <div class="row" style="margin-top:10px"><button id="intakeBtn" class="btn btn-primary">Brief elemzése</button></div>
-                <div class="stage-head" style="margin-top:18px"><h2>Pozícióadatok</h2></div>
-                <div id="posForm"></div>
-              </div>
-              <div class="stage">
-                <div class="stage-head"><h2>Pozíció-összefoglaló és véglegesítés</h2>
-                  <p class="stage-sub">Az AI javaslatot ad a briefből — te szerkeszted a véglegesített változatot, és az megy tovább a keresésbe.</p></div>
-                <div id="intakeOut" class="out"></div>
-              </div>
+            <div class="stage">
+              <div class="stage-head"><h2>Brief</h2>
+                <p class="stage-sub">Illeszd be a hiring manager nyers briefjét. Az elemzés eredménye javaslat — te hagyod jóvá vagy szerkeszted.</p></div>
+              <label class="sr-only" for="briefInput">A hiring manager nyers briefje</label>
+              <textarea id="briefInput" class="brief" placeholder="Illeszd be a nyers briefet ide…"></textarea>
+              <div class="row" style="margin-top:10px"><button id="intakeBtn" class="btn btn-primary">Brief elemzése</button></div>
+              <div id="intakeOut" class="out"></div>
+            </div>
+
+            <div class="stage">
+              <div class="stage-head"><h2>Pozícióadatok</h2>
+                <p class="stage-sub">A megbízás törzsadatai. Az ügyfél neve vezérli a kizárási szabályokat is.</p></div>
+              <div id="posForm"></div>
             </div>
           </section>
 
@@ -100,40 +101,40 @@
               <div class="stage-head"><h2>Célpiac</h2>
                 <p class="stage-sub">Hol dolgoznak a szerephez illő emberek, és milyen keresésekkel érdemes megtalálni őket. A terv és a térkép a futás után is szerkeszthető — kézzel vagy a stratégia-asszisztenssel.</p></div>
 
-              <div class="steps3">
-                <div class="stepc" id="stepPlan">
-                  <div class="stepn">① TERV</div>
+              <ol class="steps3">
+                <li class="stepc" id="stepPlan">
+                  <div class="stepn">① Terv</div>
                   <div class="stepc-h">Keresési terv</div>
-                  <p class="kpi-desc">Célpozíciók, célcégek, szinonimák és lekérdezések. Ez adja a kutatás alapját.</p>
+                  <p class="stepc-d">Célpozíciók, célcégek, szinonimák és lekérdezések. Ez adja a kutatás alapját.</p>
                   <div class="row">
                     <button id="queryBtn" class="btn btn-primary">Keresési terv készítése</button>
                     <details class="stepmenu"><summary aria-label="További műveletek">⋯</summary>
                       <button id="queryResetBtn" class="btn btn-ghost" title="A kézi módosítások elvetésével új tervet kér">Új terv nulláról</button>
                     </details>
                   </div>
-                </div>
-                <div class="stepc" id="stepMap">
-                  <div class="stepn">② TÉRKÉP</div>
+                </li>
+                <li class="stepc" id="stepMap">
+                  <div class="stepn">② Térkép</div>
                   <div class="stepc-h">Célpiac-térkép</div>
-                  <p class="kpi-desc" id="stepMapNote">Célcégek, versenytárs-klaszterek, közösségek.</p>
+                  <p class="stepc-d" id="stepMapNote">Célcégek, versenytárs-klaszterek, közösségek.</p>
                   <div class="row"><button id="talentBtn" class="btn">Célpiac-térkép</button></div>
-                </div>
-                <div class="stepc" id="stepDisc">
-                  <div class="stepn">③ KUTATÁS</div>
+                </li>
+                <li class="stepc" id="stepDisc">
+                  <div class="stepn">③ Kutatás</div>
                   <div class="stepc-h">Jelöltkutatás</div>
-                  <p class="kpi-desc" id="stepDiscNote">A terv alapján keresi meg az embereket.</p>
+                  <p class="stepc-d" id="stepDiscNote">A terv alapján keresi meg az embereket.</p>
                   <div class="row">
-                    <button id="discoverBtn" class="btn btn-primary">Jelöltkutatás indítása</button>
-                    <span class="src-toggle">forrás:
-                      <select id="sourceSel" aria-label="Adatforrás">
+                    <button id="discoverBtn" class="btn">Jelöltkutatás indítása</button>
+                    <span class="src-toggle"><label for="sourceSel">forrás:</label>
+                      <select id="sourceSel">
                         <option value="auto">automatikus</option>
                         <option value="firecrawl">nyilvános webes források (élő)</option>
                         <option value="synthetic">mintaadatok</option>
                       </select>
                     </span>
                   </div>
-                </div>
-              </div>
+                </li>
+              </ol>
 
               <div id="discoverNote"></div>
 
@@ -143,7 +144,7 @@
                   <div id="talentOut" class="out"></div>
                   <div id="stratChat"></div>
                 </div>
-                <aside class="cel-side"><div id="exclOut" class="out"></div></aside>
+                <aside class="cel-side" aria-label="Kizárási szabályok"><div id="exclOut" class="out"></div></aside>
               </div>
             </div>
           </section>
@@ -183,19 +184,20 @@
   <div id="candDrawer" class="drawer drawer-wide hidden" role="dialog" aria-modal="true" aria-labelledby="candDrawerTitle">
     <div class="drawer-head">
       <div class="drawer-head-txt">
-        <h3 id="candDrawerTitle">Jelölt</h3>
+        <h3 id="candDrawerTitle" tabindex="-1">Jelölt</h3>
         <div id="candDrawerSub" class="crow-head"></div>
       </div>
       <button id="candDrawerClose" class="btn btn-ghost" aria-label="Panel bezárása" title="Bezárás (Esc)">✕</button>
     </div>
-    <div id="candTabs" class="tabs" role="tablist"></div>
+    <div id="candTabs" class="tabs" role="tablist" aria-label="Jelölt adatai"></div>
+    <div id="drawerTask"></div>
     <div id="candDrawerBody" class="drawer-body"></div>
   </div>
 
   <!-- Napló: megbízás- és jelöltszintű jegyzetek, minden képernyőről elérhető -->
   <div id="notesDrawer" class="drawer hidden" role="dialog" aria-modal="true" aria-labelledby="notesTitle">
     <div class="drawer-head">
-      <div class="drawer-head-txt"><h3 id="notesTitle">Napló</h3><div class="crow-head">Jegyzetek és módszertani segítség</div></div>
+      <div class="drawer-head-txt"><h3 id="notesTitle" tabindex="-1">Napló</h3><div class="crow-head">Jegyzetek és módszertani segítség</div></div>
       <button id="notesClose" class="btn btn-ghost" aria-label="Napló bezárása" title="Bezárás (Esc)">✕</button>
     </div>
     <div id="notesBody" class="drawer-body"></div>
@@ -208,7 +210,9 @@
     <div id="moreBody" class="sheet-body"></div>
   </div>
 
-  <div id="toast" class="toast hidden"></div>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <div id="srLive" class="sr-only" role="status" aria-live="polite"></div>
+  <div id="srAlert" class="sr-only" role="alert"></div>
 
   <script src="mock-api.js"></script>
   <script src="app.js"></script>
