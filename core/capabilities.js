@@ -227,6 +227,7 @@ export async function rankTargets({ candidates, intake }, { projectId } = {}) {
   const ids = (candidates || []).map((c) => c.id);
   const task = `FELADAT: Készíts prioritási javaslatot: kivel érdemes először felvenni a kapcsolatot, és kivel nem. Őszinte prioritás: a gyenge/nem-illő jelölt is kap helyet, a "D — most nem javasolt" kategóriában, indoklással. A javaslat LEHET elutasító, ha az evidencia ezt támasztja alá. A prioritást a recruiter felülbírálhatja.
 ELSZÁMOLTATHATÓSÁG: a "ranked" tömb MINDEN bemeneti jelöltet tartalmazzon — senki nem eshet ki némán (de kaphat D-kategóriát).
+FÖLDRAJZ: ha egy jelölt "geo_fit" mezője "out_of_scope", és a szerep helyszínhez kötött (nem távoli munkavégzés), vedd figyelembe a rangsorolásnál, és jelezd tömören a rationale-ben.
 TÖMÖRSÉG (kötelező): gyors sor, NEM mély elemzés. A "rationale" EGYETLEN rövid tagmondat (max ~10 szó). SEMMI más mező — se név, se evidencia-lista.
 ${LANG}
 Kimeneti JSON séma:
@@ -234,7 +235,7 @@ Kimeneti JSON séma:
  "ranked": [ { "candidate_id": "...", "contact_priority": 1, "tier": "A — elsőként keresd meg|B — következő kör|C — figyelőlista|D — most nem javasolt", "rationale": "<max 10 szó>" } ],
  "note": "Prioritási javaslat evidencia alapján — a recruiter felülbírálhatja."
 }`;
-  const input = `JELÖLTEK:\n${J((candidates || []).map((c) => ({ id: c.id, name: c.name, headline: c.headline, signals: c.signals })))}\n\nSZEREP:\n${J(intake || {})}`;
+  const input = `JELÖLTEK:\n${J((candidates || []).map((c) => ({ id: c.id, name: c.name, headline: c.headline, location: c.location, geo_fit: c.geo_fit, signals: c.signals })))}\n\nSZEREP:\n${J(intake || {})}`;
   return run(
     "rankTargets",
     {
