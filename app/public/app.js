@@ -1484,6 +1484,12 @@ function candMatches(p, x, f, withState) {
   }
   return true;
 }
+function geoFitChip(geoFit) {
+  if (!geoFit || geoFit === "unknown") return "";
+  const cls = geoFit === "in_scope" ? "good" : geoFit === "out_of_scope" ? "bad" : "warn";
+  const label = geoFit === "in_scope" ? "helyszín: illeszkedik" : geoFit === "out_of_scope" ? "helyszín: eltér" : "helyszín: bizonytalan";
+  return `<span class="chip ${cls}">${esc(label)}</span>`;
+}
 function candCardHtml(p, x) {
   const t = effTier(p, x.id);
   const ov = p.priority_overrides[x.id];
@@ -1499,6 +1505,7 @@ function candCardHtml(p, x) {
     <div class="bcard-name">${esc(x.name)}</div>
     <div class="bcard-meta">${esc(x.headline || "")}</div>
     <div class="bcard-meta dim">${esc([x.current_company, x.location].filter(Boolean).join(" · "))}</div>
+    ${geoFitChip(x.geo_fit)}
     <div class="bcard-chips">${candStateChips(p, x)}<span class="chip">${strongCount(x)} erős jel</span></div>
     <div class="bcard-next">${esc(candNext(p, x))}</div>
   </div>`;
@@ -1512,7 +1519,7 @@ function candRowHtml(p, x) {
       ${["A", "B", "C", "D"].map((k) => `<option value="${k}" ${t === k ? "selected" : ""}>${k}</option>`).join("")}
     </select>
     <div><div class="crow-name">${esc(x.name)}</div><div class="crow-head">${esc(x.headline || "")}</div></div>
-    <div class="crow-meta">${esc(x.current_company || "")}${x.location ? "<br>" + esc(x.location) : ""}</div>
+    <div class="crow-meta">${esc(x.current_company || "")}${x.location ? "<br>" + esc(x.location) : ""}${geoFitChip(x.geo_fit) ? "<br>" + geoFitChip(x.geo_fit) : ""}</div>
     <div class="crow-meta">${srcLabel(x.source_type)}<br><span class="mut">${strongCount(x)} erős jel</span>${ov ? `<br><span class="mut" style="font-size:10px">kézzel állítva</span>` : ""}</div>
     <div class="crow-state">${candStateChips(p, x)}<div class="mut" style="margin-top:3px">Következő: ${candNext(p, x)}</div></div>
     <button class="btn crow-open" data-id="${esc(x.id)}">Részletek</button>
@@ -1769,7 +1776,7 @@ function renderDrawer(p, c) {
     <div class="d-sec"><h5>Profil</h5>
       <div class="crow-name">${esc(c.name)}</div>
       <div class="crow-head">${esc(c.headline || "")}</div>
-      <div class="crow-meta" style="margin-top:4px">${[c.current_company, c.location].filter(Boolean).map(esc).join(" · ")}</div>
+      <div class="crow-meta" style="margin-top:4px">${[c.current_company, c.location].filter(Boolean).map(esc).join(" · ")} ${geoFitChip(c.geo_fit)}</div>
       ${(c.past_companies || []).length ? `<div class="crow-meta" style="margin-top:2px">Korábban: ${(c.past_companies || []).map(esc).join(" · ")}</div>` : ""}
       <div class="row" style="margin-top:8px">
         <label style="font-size:12px">Prioritás:</label>
