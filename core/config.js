@@ -38,6 +38,7 @@ export const config = {
   reachSearchLimit: parseInt(process.env.REACH_SEARCH_LIMIT || "6", 10),
   reachScrapeTop: parseInt(process.env.REACH_SCRAPE_TOP || "6", 10),
   reachDefaultSource: process.env.REACH_DEFAULT_SOURCE || "auto",
+  reachBroadenThreshold: parseInt(process.env.REACH_BROADEN_THRESHOLD || "6", 10),
 
   port: parseInt(process.env.PORT || "5178", 10),
 };
