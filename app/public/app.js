@@ -1124,6 +1124,8 @@ function renderQuery(p) {
   const out = $("#queryOut");
   if (!o) { if (p.intake) out.innerHTML = ""; return; }
   const edited = !!o._edited_by_recruiter;
+  const gs = o.geo_scope;
+  const elasticityLabel = { tight: "szűk (helyi)", moderate: "közepes (régiós)", loose: "tág (országos/nemzetközi)" };
   out.innerHTML = `
     <div class="card">
       <h4>Keresési terv ${demoTag(o)} ${edited ? `<span class="ai-status ok">Recruiter által szerkesztve</span>` : `<span class="ai-status">AI-javaslat — szerkeszthető</span>`}</h4>
@@ -1131,6 +1133,11 @@ function renderQuery(p) {
       <div class="cov-label" style="margin-top:10px">Célpozíciók</div>${chipEditor("qTitles", o.target_titles, { placeholder: "Új célpozíció…" })}
       <div class="cov-label" style="margin-top:12px">Célcégek</div>${chipEditor("qCompanies", o.target_companies, { placeholder: "Új célcég…" })}
       <div class="cov-label" style="margin-top:12px">Kulcs-szinonimák</div>${chipEditor("qSyn", o.synonyms, { placeholder: "Új szinonima…" })}
+      ${gs ? `
+      <div class="cov-label" style="margin-top:12px">Földrajzi hatókör <span class="chip">${esc(elasticityLabel[gs.search_elasticity] || gs.search_elasticity)}</span></div>
+      ${chips((gs.catchment_places || []).map((c) => c.cross_border ? `${c.place} (${c.country})` : c.place))}
+      ${gs.rationale ? `<p class="kpi-desc" style="margin-top:4px">${esc(gs.rationale)}</p>` : ""}
+      ` : ""}
       <details class="or-why" id="qDetails"${detailsOpen("qDetails")} style="margin-top:12px"><summary>Keresési lekérdezések (szerkeszthető)</summary>
         <div class="cov-label" style="margin-top:8px">Boolean / X-ray lekérdezések</div>
         ${(o.boolean_queries || []).map((q, i) => `<div class="q-row"><div class="q-plat">${esc(q.platform || "egyéb")}</div><textarea class="q-code q-edit" data-qi="${i}" rows="2">${esc(q.query || "")}</textarea><button class="btn ed-x-btn" data-qrm="${i}" title="Lekérdezés törlése">×</button></div>`).join("")
@@ -1138,6 +1145,10 @@ function renderQuery(p) {
         <div class="ed-add q-add"><input class="ed-in" id="qBoolNew" placeholder="Új boolean lekérdezés…" /><button class="btn" id="qBoolAdd">+</button></div>
         <div class="cov-label" style="margin-top:14px">Webes kereső-lekérdezések</div>
         ${chipEditor("qWeb", o.firecrawl_search_queries, { placeholder: "Új webes lekérdezés…" })}
+        ${(o.firecrawl_search_queries_broad || []).length ? `
+        <div class="cov-label" style="margin-top:14px">Tág kör (automatikus tartalék, ha a szűk kör kevés találatot hoz)</div>
+        ${(o.firecrawl_search_queries_broad || []).map((q) => `<code class="q-code">${esc(q)}</code>`).join("")}
+        ` : ""}
       </details>
     </div>`;
   wireDetails("qDetails");
