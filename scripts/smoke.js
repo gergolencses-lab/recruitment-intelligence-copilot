@@ -16,8 +16,10 @@ ok("intakeReframe → clarification_points", Array.isArray(intake.clarification_
 
 const query = await ric.queryBuild({ intake });
 ok("queryBuild → firecrawl_search_queries", Array.isArray(query.firecrawl_search_queries) && query.firecrawl_search_queries.length > 0);
+ok("queryBuild → firecrawl_search_queries_broad", Array.isArray(query.firecrawl_search_queries_broad));
+ok("queryBuild → geo_scope", !!query.geo_scope && ["tight", "moderate", "loose"].includes(query.geo_scope.search_elasticity));
 
-const disc = await ric.discoverCandidates({ searchQueries: query.firecrawl_search_queries, source: "synthetic" });
+const disc = await ric.discoverCandidates({ searchQueries: query.firecrawl_search_queries, broadSearchQueries: query.firecrawl_search_queries_broad, geoScope: query.geo_scope, source: "synthetic" });
 ok("discover → candidates", Array.isArray(disc.candidates) && disc.candidates.length > 0);
 console.log(`   forrás=${disc.source}, jelöltek=${disc.candidates.length}`);
 
