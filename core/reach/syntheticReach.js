@@ -191,6 +191,36 @@ function clientInsiders(client) {
   ];
 }
 
+const COUNTRY_NAME_TO_CODE = {
+  hungary: "HU",
+  poland: "PL",
+  czechia: "CZ",
+  "czech republic": "CZ",
+  romania: "RO",
+  slovakia: "SK",
+};
+
+function countryCodeOf(location) {
+  const parts = String(location || "").split(",");
+  if (parts.length < 2) return null;
+  return parts[parts.length - 1].trim().toUpperCase();
+}
+
+function matchesGeo(candidate, geoScope) {
+  if (!geoScope || !Array.isArray(geoScope.catchment_places) || !geoScope.catchment_places.length) return true;
+  const candCode = countryCodeOf(candidate.location);
+  if (!candCode) return true;
+  const wantedCodes = new Set(
+    geoScope.catchment_places
+      .map((p) => COUNTRY_NAME_TO_CODE[String(p.country || "").trim().toLowerCase()])
+      .filter(Boolean)
+  );
+  if (!wantedCodes.size) return true;
+  return wantedCodes.has(candCode);
+}
+
+const MIN_SYNTHETIC_RESULTS = 3;
+
 const stamp = (c) => ({
   past_companies: [],
   ...c,
@@ -205,7 +235,7 @@ const stamp = (c) => ({
   },
 });
 
-export async function gatherSynthetic(client) {
+export async function gatherSynthetic(client, geoScope) {
   const pool = POOL.map((c, i) => stamp({ ...c, id: `syn-${String(i + 1).padStart(3, "0")}` }));
   const ins = clientInsiders(client).map(stamp);
   // Szétszórva, nem a lista végén: így a prioritási javaslat is felveszi őket,
@@ -213,5 +243,6 @@ export async function gatherSynthetic(client) {
   pool.splice(1, 0, ins[0]);
   pool.splice(4, 0, ins[1]);
   pool.splice(7, 0, ins[2]);
-  return pool;
+  const geoFiltered = pool.filter((c) => matchesGeo(c, geoScope));
+  return geoFiltered.length >= MIN_SYNTHETIC_RESULTS ? geoFiltered : pool;
 }
