@@ -41,9 +41,17 @@ Bárki megnyithatja és **valós Claude + Firecrawl** keresést futtathat rajta.
 ```bash
 cd "recruitment-intelligence-copilot"
 npm install
+git config core.hooksPath .githooks   # 🔒 titok-őr bekapcsolása (egyszeri, ajánlott)
 cp .env.example .env        # (opcionális) töltsd ki a kulcsokat az éles módhoz
 npm run app                 # → http://localhost:5178
 ```
+
+> 🔒 **A titok-őrről.** A `git config core.hooksPath .githooks` egy pre-commit
+> ellenőrzést kapcsol be, ami blokkolja a commitot, ha valódi API-kulcs
+> formátumú érték (`sk-ant-api03-…`, `fc-…`, AWS, GitHub token stb.) kerülne
+> verziókövetett fájlba, illetve ha a `.env` vagy egy kitöltött `.env.example`
+> lenne staged. Repónként egyszer kell kiadni — a git a hookokat nem klónozza.
+> Szándékos átlépés: `git commit --no-verify`.
 
 Nyisd meg a böngészőben: **http://localhost:5178**
 Hozz létre egy megbízást (pozíció + ügyfél + alapadatok), illeszd be a briefet, és haladj a vezetett — de nem kényszerített — folyamaton:
