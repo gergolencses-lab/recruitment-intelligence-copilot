@@ -1,5 +1,11 @@
 node_modules/
+
+# Minden .env-variáns titkot tartalmazhat (.env.bak, .env.local, .env.production…),
+# a puszta ".env" viszont csak a pontos nevet fedi le. Csak a .env.example kivétel.
 .env
+.env.*
+!.env.example
+
 data/
 *.log
 .DS_Store
