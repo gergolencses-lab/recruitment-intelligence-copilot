@@ -237,12 +237,15 @@ const stamp = (c) => ({
 
 export async function gatherSynthetic(client, geoScope) {
   const pool = POOL.map((c, i) => stamp({ ...c, id: `syn-${String(i + 1).padStart(3, "0")}` }));
+  const geoFiltered = pool.filter((c) => matchesGeo(c, geoScope));
+  const resultPool = geoFiltered.length >= MIN_SYNTHETIC_RESULTS ? geoFiltered : pool;
+
   const ins = clientInsiders(client).map(stamp);
   // Szétszórva, nem a lista végén: így a prioritási javaslat is felveszi őket,
   // és látszik, hogy a kizárás valódi, magas prioritású találatokat fog meg.
-  pool.splice(1, 0, ins[0]);
-  pool.splice(4, 0, ins[1]);
-  pool.splice(7, 0, ins[2]);
-  const geoFiltered = pool.filter((c) => matchesGeo(c, geoScope));
-  return geoFiltered.length >= MIN_SYNTHETIC_RESULTS ? geoFiltered : pool;
+  // Insiderek mindig túlélik a geo-szűrést — garantált, determinisztikus jel az exclusion UI-hoz.
+  resultPool.splice(1, 0, ins[0]);
+  resultPool.splice(4, 0, ins[1]);
+  resultPool.splice(7, 0, ins[2]);
+  return resultPool;
 }

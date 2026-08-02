@@ -37,4 +37,19 @@ const nothingMatches = await gatherSynthetic("", {
 });
 ok("Nincs egyező ország → visszaesik a teljes (17-es) poolra (fail-open)", nothingMatches.length === 17);
 
+// 6) PL-only geo_scope: csak 2 lengyel jelölt az alap poolban (Nowak, Wójcik).
+// 2 < MIN_SYNTHETIC_RESULTS (3) → fallback teljes poolra + insiderek = 17.
+const polandOnly = await gatherSynthetic("", {
+  catchment_places: [{ place: "Warsaw", country: "Poland", cross_border: false, note: "test" }],
+});
+ok("PL-only geo_scope → csak 2 páldány az alap poolban, fallback teljes pool → 17", polandOnly.length === 17);
+
+// 7) PL-only + Acme Kft: insiderek túl kell élniük a geo-szűrésnek,
+// még akkor is, ha az alap pool a küszöb alatt van.
+const polandAcme = await gatherSynthetic("Acme Kft", {
+  catchment_places: [{ place: "Warsaw", country: "Poland", cross_border: false, note: "test" }],
+});
+ok("PL-only geo_scope + Acme Kft → insiderek túlélik a szűrést", polandAcme.some((c) => c.current_company === "Acme Kft"));
+ok("PL-only + Acme Kft → teljes pool + insiderek = 17", polandAcme.length === 17);
+
 console.log("\nsyntheticReach geo-szűrés teszt kész.");
