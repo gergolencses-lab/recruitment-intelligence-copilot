@@ -178,9 +178,9 @@ Kimeneti JSON séma:
 }
 
 // ── 📡 JELÖLTKUTATÁS (Reach Engine) ──────────────────────────
-export async function discoverCandidates({ searchQueries, source, onProgress, client }, { projectId } = {}) {
-  audit({ capability: "discoverCandidates", projectId, input: { searchQueries, source }, mode: "reach" });
-  const res = await reachDiscover({ searchQueries, source, onProgress, client });
+export async function discoverCandidates({ searchQueries, broadSearchQueries, geoScope, source, onProgress, client }, { projectId } = {}) {
+  audit({ capability: "discoverCandidates", projectId, input: { searchQueries, broadSearchQueries, geoScope, source }, mode: "reach" });
+  const res = await reachDiscover({ searchQueries, broadSearchQueries, geoScope, source, onProgress, client });
   return res; // { source, candidates, note }
 }
 
