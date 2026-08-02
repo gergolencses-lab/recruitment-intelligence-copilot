@@ -18,15 +18,15 @@ const TOOLS = [
   },
   {
     name: "query_build",
-    description: "🧠 Keresési terv készítése: boolean lekérdezések + 'firecrawl_search_queries', amelyek a nyilvános webes jelöltkutatást vezérlik (senior tech / CEE).",
-    inputSchema: { type: "object", properties: { intake: OBJ, brief: STR } },
-    run: (a) => ric.queryBuild({ intake: a.intake, brief: a.brief }),
+    description: "🧠 Keresési terv készítése: 'firecrawl_search_queries' (szűk kör) + 'firecrawl_search_queries_broad' (tág, tartalék kör) + 'geo_scope' (földrajzi hatókör + rugalmasság), amelyek a nyilvános webes jelöltkutatást vezérlik (senior tech / CEE).",
+    inputSchema: { type: "object", properties: { intake: OBJ, brief: STR, position: OBJ } },
+    run: (a) => ric.queryBuild({ intake: a.intake, brief: a.brief, position: a.position }),
   },
   {
     name: "discover_candidates",
-    description: "📡 Jelöltkutatás nyilvánosan elérhető szakmai forrásokban (nincs belépett/fake-account LinkedIn-hozzáférés). Kulcs nélkül mintaadatokkal fut. Bemenet: a query_build 'firecrawl_search_queries' listája.",
-    inputSchema: { type: "object", properties: { search_queries: { type: "array", items: STR }, source: { type: "string", enum: ["auto", "firecrawl", "synthetic"] } }, required: ["search_queries"] },
-    run: (a) => ric.discoverCandidates({ searchQueries: a.search_queries, source: a.source }),
+    description: "📡 Jelöltkutatás nyilvánosan elérhető szakmai forrásokban (nincs belépett/fake-account LinkedIn-hozzáférés). Kulcs nélkül mintaadatokkal fut. Bemenet: a query_build 'firecrawl_search_queries', 'firecrawl_search_queries_broad' és 'geo_scope' kimenete.",
+    inputSchema: { type: "object", properties: { search_queries: { type: "array", items: STR }, broad_search_queries: { type: "array", items: STR }, geo_scope: OBJ, source: { type: "string", enum: ["auto", "firecrawl", "synthetic"] } }, required: ["search_queries"] },
+    run: (a) => ric.discoverCandidates({ searchQueries: a.search_queries, broadSearchQueries: a.broad_search_queries, geoScope: a.geo_scope, source: a.source }),
   },
   {
     name: "talent_map",
