@@ -46,6 +46,10 @@ Kimeneti séma:
 
 const VALID_GEO_FIT = ["in_scope", "adjacent", "out_of_scope", "unknown"];
 
+export function coerceGeoFit(value) {
+  return VALID_GEO_FIT.includes(value) ? value : null;
+}
+
 export async function normalizeHits(hits, geoScope) {
   const withRef = hits.map((h, i) => ({ ...h, ref: `h${i}` }));
 
@@ -91,7 +95,7 @@ export async function normalizeHits(hits, geoScope) {
       // vagy bukik — ha üres, csak a jelenlegi munkáltatóra tudunk szűrni.
       past_companies: Array.isArray(e.past_companies) ? e.past_companies.filter(Boolean) : [],
       location: e.location || null,
-      geo_fit: VALID_GEO_FIT.includes(e.geo_fit) ? e.geo_fit : null,
+      geo_fit: coerceGeoFit(e.geo_fit),
       is_person: e.is_person !== false,
       signals: signals.length ? signals : [{ signal: stripSensitive(h.description || ""), strength: "gyenge" }],
       source_url: h.url,
