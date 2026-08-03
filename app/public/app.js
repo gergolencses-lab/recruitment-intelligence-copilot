@@ -1487,7 +1487,7 @@ function candMatches(p, x, f, withState) {
 function geoFitChip(geoFit) {
   if (!geoFit || geoFit === "unknown") return "";
   const cls = geoFit === "in_scope" ? "good" : geoFit === "out_of_scope" ? "bad" : "warn";
-  const label = geoFit === "in_scope" ? "helyszín: illeszkedik" : geoFit === "out_of_scope" ? "helyszín: eltér" : "helyszín: bizonytalan";
+  const label = geoFit === "in_scope" ? "helyszín: AI-terv szerint illeszkedik" : geoFit === "out_of_scope" ? "helyszín: AI-terv szerint eltér" : "helyszín: AI-terv szerint bizonytalan";
   return `<span class="chip ${cls}">${esc(label)}</span>`;
 }
 function candCardHtml(p, x) {

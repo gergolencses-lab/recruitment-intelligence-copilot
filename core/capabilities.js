@@ -59,37 +59,37 @@ export async function queryBuild({ intake, brief, position, briefFinal }, { proj
   const client = (position && position.client) || "";
   const task = `FELADAT: Készíts keresési tervet HÁROM részben.
 
-(1) LEKÉRDEZÉSEK: "firecrawl_search_queries" — a SZŰK kör, ami a nyilvános webes felkutatást vezérli (Google-stílusú, site: operátorokkal, senior tech / CEE fókusz), az elengedhetetlen feltételek (must_haves) mindegyikét ÉSelve. ÉS "firecrawl_search_queries_broad" — a TÁG kör: csak a szerep magja (cím/terület), az elengedhetetlen feltételek szigorú kombinációja NÉLKÜL; ez akkor kerül ténylegesen lekérdezésre, ha a szűk kör kevés találatot hoz. Boolean lekérdezéseket is adj a szokásos platformokra.
-${LANG}
-KIZÁRÁS — KÖTELEZŐ, HA AZ ÜGYFÉL CÉGE ISMERT: ha a bemenetben szerepel "AZ ÜGYFÉL CÉGE" adat, az a cég SOHA nem lehet célcég, és MINDKÉT lekérdezés-listába (szűk és tág is) negatív szűrőként be kell kerülnie (pl. -"Ügyfél Neve"). Az ügyfél jelenlegi és volt munkatársait a hiring manager amúgy is ismeri; ha bekerülnek a merítésbe, az a keresés hitelét viszi. Az "exclude_companies" listába vedd fel az ügyfél cégét és a felismerhető leányvállalatait. HA AZ ÜGYFÉL CÉGE NEM ISMERT (nincs megadva a bemenetben): SEMMILYEN körülmények között ne találj ki vagy told be helyőrző/placeholder szöveget (pl. "[ÜGYFÉL_CÉGNÉV_MEGADANDÓ]") a lekérdezésekbe — egyszerűen hagyd ki a negatív szűrőt mindkét listából, és az "exclude_companies" legyen üres tömb.
-
-(2) FÖLDRAJZI HATÓKÖR ("geo_scope"): gondolkodj el a szerep valódi keresési földrajzán. Elsőként reálisan, megnevezett helyekben gondolkodj (akár országhatáron át is, ha egy külföldi hely road-távolságban közelebb van, mint egy belföldi) — csak olyan helyet vegyél fel, amire konkrét, evidencia-alapú indokod van (valós ingázási folyosó, ismert vonzáskörzeti település, dokumentált határon-átnyúló munkaerő-mozgás); ne told fel a listát spekulatív, "néha idesorolható" helyekkel. NE adj meg konkrét perc- vagy km-adatot — ehhez nincs megbízható adatod, csak relatív/összehasonlító ítéleted lehet ("X közelebb van az anchorhoz, mint Y"). Az anchor (a megbízás helyszíne, position.location) MINDIG szerepeljen a catchment_places listában, a rugalmasságtól függetlenül.
+(1) FÖLDRAJZI HATÓKÖR ("geo_scope"): gondolkodj el a szerep valódi keresési földrajzán, MIELŐTT a lekérdezéseket megírnád — a lekérdezések ebből fognak építkezni. Elsőként reálisan, megnevezett helyekben gondolkodj (akár országhatáron át is, ha egy külföldi hely road-távolságban közelebb van, mint egy belföldi) — csak olyan helyet vegyél fel, amire konkrét, evidencia-alapú indokod van (valós ingázási folyosó, ismert vonzáskörzeti település, dokumentált határon-átnyúló munkaerő-mozgás); ne told fel a listát spekulatív, "néha idesorolható" helyekkel. NE adj meg konkrét perc- vagy km-adatot — ehhez nincs megbízható adatod, csak relatív/összehasonlító ítéleted lehet ("X közelebb van az anchorhoz, mint Y"). Az anchor (a megbízás helyszíne, position.location) MINDIG szerepeljen a catchment_places listában, a rugalmasságtól függetlenül.
 
 Másodjára állapítsd meg a "search_elasticity" értéket (tight|moderate|loose) — ez azt fejezi ki, mennyire kell a keresést földrajzilag megkötni, és a szerep valós piaci utánpótlási mintázatából következik, NEM a munkavégzés helyszínéből (helyszíni/hibrid/távoli) és NEM abból, hogy a helylista hosszú-e vagy határon átnyúlik-e:
 - "tight": belépő szintű, nagy volumenű, műszakos vagy más módon helyettesíthető/bőséges helyi munkaerő-kínálatú szerep, fizikai jelenléttel. Behatárolt helyi/céges-buszjárat vonzáskörzet.
 - "moderate": senior IC / szakértő / csoportvezetői szerep valós, de részleges helyszíni elvárással. Szélesebb, akár régiós/határon-átnyúló ingázási terület, de nem költözés-alapú keresés.
 - "loose": valódi felsővezetői/C-szintű vagy ritka szakértői keresés, amit jellemzően országosan vagy nemzetközileg töltenek be, ahol a költözés/nem-napi ingázás a norma. Ilyenkor ne ingázási sugárban gondolkodj, hanem országos/nemzetközi tehetségpiacban.
 
-Mielőtt lezárnád: ellenőrizd, hogy a "search_elasticity" összhangban van-e a földrajzi indoklásoddal — ha behatárolt helyi/buszjárat-vonzáskörzetet írtál le, az elasticity nem lehet "loose"; ha országos/ritka-szakértői tehetségpiacról írtál, ne írj le egyúttal szűk ingázó-települések gyűrűjét. Ha a kettő nem egyezik, javítsd az egyiket, mielőtt válaszolsz. "loose" rugalmasság esetén is adj meg valós, konkrét helyeket (pl. domináns szakmai-vezetői központokat, releváns nemzetközi csomópontokat a brief kontextusához kötve) — az üres lista nem elfogadható válasz.
+Mielőtt továbblépnél: ellenőrizd, hogy a "search_elasticity" összhangban van-e a földrajzi indoklásoddal — ha behatárolt helyi/buszjárat-vonzáskörzetet írtál le, az elasticity nem lehet "loose"; ha országos/ritka-szakértői tehetségpiacról írtál, ne írj le egyúttal szűk ingázó-települések gyűrűjét. Ha a kettő nem egyezik, javítsd az egyiket. "loose" rugalmasság esetén is adj meg valós, konkrét helyeket (pl. domináns szakmai-vezetői központokat, releváns nemzetközi csomópontokat a brief kontextusához kötve) — az üres lista nem elfogadható válasz.
+
+(2) LEKÉRDEZÉSEK: "firecrawl_search_queries" — a SZŰK kör, ami a nyilvános webes felkutatást vezérli (Google-stílusú, site: operátorokkal, senior tech / CEE fókusz), az elengedhetetlen feltételek (must_haves) mindegyikét ÉSelve. ÉS "firecrawl_search_queries_broad" — a TÁG kör: csak a szerep magja (cím/terület), az elengedhetetlen feltételek szigorú kombinációja NÉLKÜL; ez akkor kerül ténylegesen lekérdezésre, ha a szűk kör kevés találatot hoz. MINDKÉT listába sződ bele az (1) pontban megírt geo_scope.catchment_places helyeit releváns helymegjelölésként (pl. a catchment helynevei OR-kapcsolással, ahogy egy éles kereső-lekérdezésben természetes lenne) — a lekérdezések földrajza kövesse a te saját geo_scope-indoklásodat, ne csak a position.location szó szerinti nevét. Boolean lekérdezéseket is adj a szokásos platformokra.
+${LANG}
+KIZÁRÁS — KÖTELEZŐ, HA AZ ÜGYFÉL CÉGE ISMERT: ha a bemenetben szerepel "AZ ÜGYFÉL CÉGE" adat, az a cég SOHA nem lehet célcég, és MINDKÉT lekérdezés-listába (szűk és tág is) negatív szűrőként be kell kerülnie (pl. -"Ügyfél Neve"). Az ügyfél jelenlegi és volt munkatársait a hiring manager amúgy is ismeri; ha bekerülnek a merítésbe, az a keresés hitelét viszi. Az "exclude_companies" listába vedd fel az ügyfél cégét és a felismerhető leányvállalatait. HA AZ ÜGYFÉL CÉGE NEM ISMERT (nincs megadva a bemenetben): SEMMILYEN körülmények között ne találj ki vagy told be helyőrző/placeholder szöveget (pl. "[ÜGYFÉL_CÉGNÉV_MEGADANDÓ]") a lekérdezésekbe — egyszerűen hagyd ki a negatív szűrőt mindkét listából, és az "exclude_companies" legyen üres tömb.
 
 (3) Célcégek, célpozíciók, kulcs-szinonimák — a szokásos módon.
 
-Kimeneti JSON séma:
+Kimeneti JSON séma (a mezők ebben a sorrendben, hogy a geo_scope megelőzze a lekérdezéseket):
 {
  "boolean_queries": [ { "platform": "linkedin-xray|github|google", "query": "<lekérdezés, az ügyfél negatív szűrőjével>" } ],
- "firecrawl_search_queries": ["<3-4 szűk lekérdezés, site: operátorokkal, az ügyfél negatív szűrőjével>"],
- "firecrawl_search_queries_broad": ["<2-3 tág lekérdezés, site: operátorokkal, az ügyfél negatív szűrőjével>"],
- "target_companies": ["<az ügyfél cége NEM szerepelhet itt>"],
- "target_titles": ["..."],
- "synonyms": ["..."],
- "exclude_companies": ["<az ügyfél cége és leányvállalatai — off-limits>"],
- "exclusion_note": "<egy mondat: kinek a munkatársai maradnak ki a merítésből és miért>",
  "geo_scope": {
    "search_elasticity": "tight|moderate|loose",
    "anchor": "<position.location visszaadva>",
    "catchment_places": [ { "place": "...", "country": "...", "cross_border": true, "note": "<konkrét, evidencia-alapú indok>" } ],
    "rationale": "<földrajzi indoklás + elasticity-indoklás együtt, önellentmondás-mentesen>"
- }
+ },
+ "firecrawl_search_queries": ["<3-4 szűk lekérdezés, site: operátorokkal, a geo_scope helyeivel és az ügyfél negatív szűrőjével>"],
+ "firecrawl_search_queries_broad": ["<2-3 tág lekérdezés, site: operátorokkal, a geo_scope helyeivel és az ügyfél negatív szűrőjével>"],
+ "target_companies": ["<az ügyfél cége NEM szerepelhet itt>"],
+ "target_titles": ["..."],
+ "synonyms": ["..."],
+ "exclude_companies": ["<az ügyfél cége és leányvállalatai — off-limits>"],
+ "exclusion_note": "<egy mondat: kinek a munkatársai maradnak ki a merítésből és miért>"
 }`;
   // A recruiter által VÉGLEGESÍTETT brief az elsődleges bemenet; az AI-javaslat
   // csak akkor, ha a véglegesítés még nem történt meg.
