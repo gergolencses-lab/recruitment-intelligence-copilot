@@ -62,6 +62,11 @@ export const config = {
   judgeModel:
     process.env.JUDGE_MODEL ||
     (PROVIDER === "openai" ? "gpt-5.6-sol" : "claude-opus-5"),
+  // GPT-5.6 gondolkodási szint: none|low|medium|high|xhigh|max.
+  // Mérve: "medium" mellett egy queryBuild 46,7 mp — a Vercel-limit 60 mp,
+  // és a discover ezen felül még normalizál is. Élesben ezért "low" kell,
+  // vagy magasabb maxDuration. Lokális méréshez a "medium" a validált szint.
+  openaiReasoningEffort: process.env.OPENAI_REASONING_EFFORT || "medium",
 
   // 📡 Elérés
   firecrawlApiKey: process.env.FIRECRAWL_API_KEY || "",

@@ -90,6 +90,7 @@ async function callOpenAI({ task, user, maxTokens, model }) {
     // korábbi éles futásokban a rankTargets-et elvitte (malformed JSON, retry nélkül).
     response_format: { type: "json_object" },
     max_completion_tokens: maxTokens,
+    reasoning_effort: config.openaiReasoningEffort,
   };
 
   let resp;
@@ -99,7 +100,10 @@ async function callOpenAI({ task, user, maxTokens, model }) {
     // A reasoning-modellek a max_completion_tokens nevet várják, a régebbiek a
     // max_tokens-t. Ha a szolgáltató épp a paraméternevet kifogásolja, váltunk egyet.
     const msg = String((e && e.message) || "");
-    if (/max_completion_tokens|max_tokens|Unsupported parameter|unknown_parameter/i.test(msg)) {
+    if (/reasoning_effort/i.test(msg)) {
+      const { reasoning_effort, ...rest } = req;
+      resp = await c.chat.completions.create(rest);
+    } else if (/max_completion_tokens|max_tokens|Unsupported parameter|unknown_parameter/i.test(msg)) {
       const { max_completion_tokens, ...rest } = req;
       resp = await c.chat.completions.create({ ...rest, max_tokens: max_completion_tokens });
     } else {
