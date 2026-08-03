@@ -44,26 +44,33 @@ Kimeneti séma:
   ]
 }`;
 
+const VALID_GEO_FIT = ["in_scope", "adjacent", "out_of_scope", "unknown"];
+
 export async function normalizeHits(hits, geoScope) {
   const withRef = hits.map((h, i) => ({ ...h, ref: `h${i}` }));
 
   let extracted = {};
   if (brainAvailable() && withRef.length) {
-    try {
-      const geoBlock = geoScope ? `FÖLDRAJZI HATÓKÖR (geo_scope):\n${JSON.stringify(geoScope)}\n\n` : "";
-      const input =
-        geoBlock +
-        "TALÁLATOK:\n" +
-        withRef
-          .map(
-            (h) =>
-              `[${h.ref}] forrás=${h.source_type} url=${h.url}\ncím: ${h.title}\nleírás: ${h.description}\nkivonat: ${(h.excerpt || "").slice(0, 800)}`
-          )
-          .join("\n\n");
-      const out = await think({ task: EXTRACT_TASK, input, maxTokens: 6000, temperature: 0.2 });
-      for (const c of out.candidates || []) extracted[c.ref] = c;
-    } catch {
-      // ha az extrakció elhal, jön a heurisztika
+    const geoBlock = geoScope ? `FÖLDRAJZI HATÓKÖR (geo_scope):\n${JSON.stringify(geoScope)}\n\n` : "";
+    const input =
+      geoBlock +
+      "TALÁLATOK:\n" +
+      withRef
+        .map(
+          (h) =>
+            `[${h.ref}] forrás=${h.source_type} url=${h.url}\ncím: ${h.title}\nleírás: ${h.description}\nkivonat: ${(h.excerpt || "").slice(0, 800)}`
+        )
+        .join("\n\n");
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const out = await think({ task: EXTRACT_TASK, input, maxTokens: 6000, temperature: 0.2 });
+        for (const c of out.candidates || []) extracted[c.ref] = c;
+        break;
+      } catch (e) {
+        if (attempt === 2) {
+          console.error(`normalizeHits: AI-extrakció 2 kísérlet után is elhalt, heurisztikára esik vissza (${withRef.length} találat): ${e.message}`);
+        }
+      }
     }
   }
 
@@ -84,7 +91,7 @@ export async function normalizeHits(hits, geoScope) {
       // vagy bukik — ha üres, csak a jelenlegi munkáltatóra tudunk szűrni.
       past_companies: Array.isArray(e.past_companies) ? e.past_companies.filter(Boolean) : [],
       location: e.location || null,
-      geo_fit: e.geo_fit || null,
+      geo_fit: VALID_GEO_FIT.includes(e.geo_fit) ? e.geo_fit : null,
       is_person: e.is_person !== false,
       signals: signals.length ? signals : [{ signal: stripSensitive(h.description || ""), strength: "gyenge" }],
       source_url: h.url,
