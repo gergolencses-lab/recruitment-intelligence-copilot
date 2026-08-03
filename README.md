@@ -7,7 +7,7 @@
 >
 > A felület **megbízás-alapú**: egy megbízás = egy ügyfél egy konkrét pozíciója, saját metaadatokkal (pozíció, ügyfél, helyszín, munkavégzés, szint, felelős, státusz), feladatalapú nézetekkel (Áttekintés / Pozíció és brief / Célpiac / Jelöltek / Megkeresések / Ügyfél és interjú / Eredmények / Jegyzetek) és megbízásonként egy kiemelt következő teendővel.
 
-Ez egy **futtatható pilot** — nem mockup. Kulcs nélkül azonnal elindul (demo-mód, realisztikus HU minta-outputokkal); `ANTHROPIC_API_KEY` + `FIRECRAWL_API_KEY` megadásával **élesben** gondolkodik és **élő publikus-web scrapinget** végez.
+Ez egy **futtatható pilot** — nem mockup. Kulcs nélkül azonnal elindul (demo-mód, realisztikus HU minta-outputokkal); egy LLM-kulcs (`OPENAI_API_KEY` **vagy** `ANTHROPIC_API_KEY`) + `FIRECRAWL_API_KEY` megadásával **élesben** gondolkodik és **élő publikus-web scrapinget** végez.
 
 ---
 
@@ -25,12 +25,13 @@ Bárki megnyithatja és **valós Claude + Firecrawl** keresést futtathat rajta.
 1. Menj a **[vercel.com](https://vercel.com)** oldalra → **Continue with GitHub** (engedélyezd a privát repo elérését).
 2. **Add New… → Project** → válaszd a `recruitment-intelligence-copilot` repót → **Import**.
 3. A **Environment Variables** résznél add meg a két titkos kulcsot:
-   - `ANTHROPIC_API_KEY` → az `sk-ant-…` kulcsod
+   - `OPENAI_API_KEY` → az `sk-…` kulcsod (alapértelmezett szolgáltató), **vagy** `ANTHROPIC_API_KEY` → `sk-ant-…`
+   - `LLM_PROVIDER=openai|anthropic` → melyik hajtsa a rendszert (üresen: amelyikhez van kulcs)
    - `FIRECRAWL_API_KEY` → az `fc-…` kulcsod
 4. **Deploy.** A `vercel.json` mindent beállít (build- és route-szabályok). Kész, amikor a `/api/status` `mode:"live"`-ot ad.
 5. Másold a kapott URL-t (`https://…vercel.app`) ide a README tetejére, és oszd meg akivel akarod.
 
-> ⚠️ **Éles kulcsok publikusan:** bárki, akinek elküldöd a linket, a te API-kulcsaidat használja. Beépített **rate-limit** véd (40 művelet / IP / 15 perc), de érdemes költségkeretet állítani az Anthropic/Firecrawl fióknál. Burn-kulcshoz ideális.
+> ⚠️ **Éles kulcsok publikusan:** bárki, akinek elküldöd a linket, a te API-kulcsaidat használja. Beépített **rate-limit** véd (40 művelet / IP / 15 perc), de érdemes költségkeretet állítani az OpenAI/Anthropic/Firecrawl fióknál. Burn-kulcshoz ideális.
 >
 > ⏱️ **Válaszidő:** az éles Claude-műveletek ~20-40 mp-esek (a `vercel.json` 60 mp-re állítja a függvény-limitet — ez a Hobby-max). Az élő webes jelöltkutatás a leglassabb; ha 60 mp-nél tovább tartana, válts `mintaadatok` forrásra a Célpiac nézetben, vagy tedd Pro-ra a projektet.
 
@@ -79,13 +80,14 @@ npm run mcp                 # stdio MCP szerver
 
 | | Nincs kulcs (demo) | Kulccsal (éles) |
 |---|---|---|
-| **🧠 Elemzés** (értékelés, megközelítési terv, módszertani segítség) | realisztikus HU minta-outputok | élő Claude (`ANTHROPIC_API_KEY`) |
+| **🧠 Elemzés** (értékelés, megközelítési terv, módszertani segítség) | realisztikus HU minta-outputok | élő GPT-5.6 vagy Claude (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) |
 | **📡 Jelöltkutatás** | 14-fős minta-készlet (senior tech / CEE) | élő keresés nyilvánosan elérhető szakmai forrásokban (`FIRECRAWL_API_KEY`) |
 
 A felület mindig mutatja, épp melyik módban futsz (AI elérhető / Bemutató mód, élő források / mintaadatok). **Kulcsot csak a `.env`-be** — sosem a kódba, sosem a kliensbe.
 
 Kulcsok:
-- **Anthropic** — https://console.anthropic.com → `ANTHROPIC_API_KEY`
+- **OpenAI** — https://platform.openai.com/api-keys → `OPENAI_API_KEY` (alapértelmezett; modell: `gpt-5.6-terra`)
+- **Anthropic** — https://console.anthropic.com → `ANTHROPIC_API_KEY` (alternatíva; modell: `claude-sonnet-5`)
 - **Firecrawl** — https://www.firecrawl.dev → `FIRECRAWL_API_KEY` (Bearer, `fc-...`)
 
 ---

@@ -24,13 +24,44 @@ function loadDotenv() {
 }
 loadDotenv();
 
+// ── 🧠 Agy: melyik szolgáltató? ───────────────────────────────────────
+// Egyetlen kapcsoló dönt (LLM_PROVIDER=openai|anthropic). Ha nincs megadva,
+// az számít, amelyikhez van kulcs — OpenAI-t előnyben részesítve, mert az a
+// jelenlegi alapértelmezés. Így egy env-sor visszakapcsol a másikra anélkül,
+// hogy kódot kellene visszaállítani.
+const OPENAI_KEY = process.env.OPENAI_API_KEY || "";
+const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || "";
+
+function resolveProvider() {
+  const explicit = String(process.env.LLM_PROVIDER || "").trim().toLowerCase();
+  if (explicit === "openai" || explicit === "anthropic") return explicit;
+  if (OPENAI_KEY) return "openai";
+  if (ANTHROPIC_KEY) return "anthropic";
+  return "openai";
+}
+
+const PROVIDER = resolveProvider();
+
+// Modell: az általános LLM_MODEL mindent felülír; utána a szolgáltató-specifikus
+// változó (a régi CLAUDE_MODEL visszafelé kompatibilis marad).
+const DEFAULT_MODEL = {
+  openai: process.env.OPENAI_MODEL || "gpt-5.6-terra",
+  anthropic: process.env.CLAUDE_MODEL || "claude-sonnet-5",
+};
+
 export const config = {
   root: ROOT,
   dataDir: path.join(ROOT, "data"),
 
   // 🧠 Agy
-  anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
-  model: process.env.CLAUDE_MODEL || "claude-sonnet-5",
+  llmProvider: PROVIDER,
+  openaiApiKey: OPENAI_KEY,
+  anthropicApiKey: ANTHROPIC_KEY,
+  model: process.env.LLM_MODEL || DEFAULT_MODEL[PROVIDER],
+  // A bíró/értékelő szándékosan erősebb modellt kap, mint a termék.
+  judgeModel:
+    process.env.JUDGE_MODEL ||
+    (PROVIDER === "openai" ? "gpt-5.6-sol" : "claude-opus-5"),
 
   // 📡 Elérés
   firecrawlApiKey: process.env.FIRECRAWL_API_KEY || "",
@@ -47,7 +78,7 @@ export const config = {
 };
 
 export function brainAvailable() {
-  return !!config.anthropicApiKey;
+  return config.llmProvider === "openai" ? !!config.openaiApiKey : !!config.anthropicApiKey;
 }
 
 export function reachLiveAvailable() {

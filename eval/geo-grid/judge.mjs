@@ -15,6 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { config } from "../../core/config.js";
 import { parseJson } from "../../core/llm.js";
 
@@ -27,10 +28,45 @@ const args = Object.fromEntries(
 );
 const RUN_ID = args["run-id"] || "r1";
 const CONCURRENCY = parseInt(args.concurrency || "4", 10);
-const JUDGE_MODEL = args.model || "claude-opus-5";
+const JUDGE_MODEL = args.model || config.judgeModel;
+const PROVIDER = (args.provider || config.llmProvider).toLowerCase();
 const RUN_DIR = path.join(__dirname, "runs", RUN_ID);
 
-const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
+// A bíró szándékosan külön kliens: saját rubrikával, saját modellel dolgozik,
+// hogy a mért kód módosítása ne mozdítsa el a mércét.
+const anthropic = config.anthropicApiKey ? new Anthropic({ apiKey: config.anthropicApiKey }) : null;
+const openai = config.openaiApiKey ? new OpenAI({ apiKey: config.openaiApiKey }) : null;
+
+// ⚠️ MÓDSZERTANI FIGYELMEZTETÉS: ha a bíró ugyanattól a szolgáltatótól való,
+// mint a mért rendszer, a pontszám ÖNÉRTÉKELÉS — a modell a saját kimenetét
+// bírálja. A riport ezt kiírja, hogy ne felejtsük el az eredmény olvasásakor.
+const SELF_GRADING = PROVIDER === config.llmProvider;
+
+async function judgeComplete(input) {
+  if (PROVIDER === "openai") {
+    if (!openai) throw new Error("Nincs OPENAI_API_KEY a bíróhoz.");
+    const resp = await openai.chat.completions.create({
+      model: JUDGE_MODEL,
+      messages: [
+        { role: "system", content: RUBRIC },
+        { role: "user", content: input + "\n\n---\nVálaszolj KIZÁRÓLAG a megadott JSON objektummal." },
+      ],
+      response_format: { type: "json_object" },
+      max_completion_tokens: 8000,
+    });
+    const choice = resp.choices && resp.choices[0];
+    if (choice && choice.finish_reason === "length") throw new Error("A bíró válasza csonka (token-korlát).");
+    return (choice && choice.message && choice.message.content) || "";
+  }
+  if (!anthropic) throw new Error("Nincs ANTHROPIC_API_KEY a bíróhoz.");
+  const resp = await anthropic.messages.create({
+    model: JUDGE_MODEL,
+    max_tokens: 8000,
+    system: [{ type: "text", text: RUBRIC }],
+    messages: [{ role: "user", content: input + "\n\n---\nVálaszolj KIZÁRÓLAG a megadott JSON objektummal." }],
+  });
+  return resp.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+}
 
 const RUBRIC = `Te magyar munkaerőpiaci és földrajzi szakértő vagy, aki egy fejvadász-kereső rendszer kimenetét auditálja. A mércéd SZIGORÚ: kétség esetén BUKTATSZ. Nem a jóindulatú olvasat a feladatod, hanem az, hogy egy tapasztalt magyar recruiter mit mondana erre a keresésre.
 
@@ -111,14 +147,7 @@ Kibővítésre került-e: ${rec.metrics?.broadened ? "igen" : "nem"}
 VISSZAKAPOTT JELÖLTEK (${cands.length} db):
 ${JSON.stringify(cands, null, 2)}`;
 
-  const resp = await anthropic.messages.create({
-    model: JUDGE_MODEL,
-    max_tokens: 8000,
-    system: [{ type: "text", text: RUBRIC }],
-    messages: [{ role: "user", content: input + "\n\n---\nVálaszolj KIZÁRÓLAG a megadott JSON objektummal." }],
-  });
-  const text = resp.content.filter((b) => b.type === "text").map((b) => b.text).join("");
-  return parseJson(text);
+  return parseJson(await judgeComplete(input));
 }
 
 async function pool(items, n, worker) {
@@ -142,7 +171,13 @@ const records = files.map((f) => {
 });
 records.sort((a, b) => a.id.localeCompare(b.id));
 
-console.log(`Értékelés: ${records.length} cella, bíró=${JUDGE_MODEL}, run=${RUN_ID}\n`);
+console.log(`Értékelés: ${records.length} cella, bíró=${JUDGE_MODEL} (${PROVIDER}), run=${RUN_ID}`);
+if (SELF_GRADING) {
+  console.log(`⚠️  ÖNÉRTÉKELÉS: a bíró és a mért rendszer ugyanattól a szolgáltatótól (${PROVIDER}) való.`);
+  console.log(`   A pontszám ezért felfelé torzíthat. Független mércéhez: --provider=${PROVIDER === "openai" ? "anthropic" : "openai"}\n`);
+} else {
+  console.log(`✅ Független mérce: a bíró (${PROVIDER}) más szolgáltatótól való, mint a mért rendszer (${config.llmProvider}).\n`);
+}
 
 const scored = await pool(records, CONCURRENCY, async (rec) => {
   if (rec.error) {
@@ -187,6 +222,7 @@ console.log("Kapuk bukásai:", JSON.stringify(gateFails));
 
 const out = {
   run_id: RUN_ID, judged_at: new Date().toISOString(), judge_model: JUDGE_MODEL,
+  judge_provider: PROVIDER, system_provider: config.llmProvider, self_grading: SELF_GRADING,
   good: goodCount, total: scored.length, gate_failures: gateFails,
   cells: scored.map((s) => ({
     id: s.id, role: s.role, city: s.city, good: s.good, gates: s.gates,

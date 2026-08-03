@@ -68,6 +68,7 @@ app.get("/api/status", (req, res) => {
   res.json({
     brain: ric.brainAvailable(),
     reach_live: ric.reachLiveAvailable(),
+    provider: ric.config.llmProvider,
     model: ric.config.model,
     knowledge_version: ric.KNOWLEDGE_VERSION,
     mode: ric.brainAvailable() ? "live" : "demo",
