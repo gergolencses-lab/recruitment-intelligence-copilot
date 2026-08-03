@@ -63,11 +63,19 @@ export const config = {
     process.env.JUDGE_MODEL ||
     (PROVIDER === "openai" ? "gpt-5.6-sol" : "claude-opus-5"),
   // GPT-5.6 gondolkodási szint: none|low|medium|high|xhigh|max.
-  // Mérve ugyanazon a queryBuild-en: low 17,6 mp / 4 hely a vonzáskörzetben,
-  // medium 33,9-46,7 mp / 9 hely. A "low" pont a leggyengébb kapunkat (G2,
-  // vonzáskörzet) rontja, ezért nem azon futunk. A vercel.json maxDuration
-  // 120 mp-re emelve, hogy a magasabb szint elférjen.
-  openaiReasoningEffort: process.env.OPENAI_REASONING_EFFORT || "high",
+  //
+  // A "medium" MÉRT optimum, nem alapértelmezésből maradt itt. A 4x4 rácson:
+  //   medium → 14/16 (kétszer mérve, stabil)
+  //   high   → 11/16 és 12/16
+  // A több gondolkodás rontott: "high" szinten a modell átgondolta magát rossz
+  // keretekbe (gyártásmérnök/Pécs "loose" lett "moderate" helyett, és elhagyta
+  // a valódi ingázó gyűrűt). Nem pontosabb ítélet lett, hanem kidolgozottabb
+  // indoklás egy rossz kerethez.
+  // Egymintás latencia ugyanazon a queryBuild-en: low 17,6 mp / 4 hely,
+  // medium 33,9-46,7 mp / 9 hely, high 86,2 mp / 13 hely.
+  // Emelés előtt FUTTASD A RÁCSOT — a "több gondolkodás jobb" intuíció itt
+  // mérhetően hamis volt.
+  openaiReasoningEffort: process.env.OPENAI_REASONING_EFFORT || "medium",
 
   // 📡 Elérés
   firecrawlApiKey: process.env.FIRECRAWL_API_KEY || "",

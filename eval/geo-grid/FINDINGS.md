@@ -134,6 +134,35 @@ Független ellenőrzés a Claude-kulcs feloldása (2026-09-01) után:
 `node eval/geo-grid/judge.mjs --run-id=r5 --provider=anthropic`
 Ez ugyanazon a nyers adaton fut, újrafuttatás nélkül.
 
+### r6 — a "több gondolkodás jobb" intuíció MÉRHETŐEN HAMIS
+
+Gergő kérésére a gondolkodási szint `high`-ra ment. A rács megcáfolta:
+
+| szint | pont | megjegyzés |
+|---|---|---|
+| medium | **14/16** | kétszer mérve, mindkétszer 14, azonos kapuprofil |
+| high | 11/16 és 12/16 | ±1 bírói szórás, de a különbség ennél nagyobb |
+
+Mind az öt bukás G2 (vonzáskörzet). A legárulkodóbb eset a gyártásmérnök/Pécs:
+`medium`-on `moderate` a helyi ipari gyűrűvel, `high`-on viszont `loose` lett
+és mindössze négy hely (Pécs, Kecskemét, Győr, Bratislava) — a modell
+átgondolta magát egy "országos tehetségpiac" keretbe, elhagyta a valódi
+ingázó gyűrűt, és közben az országos piacot sem fedte le.
+
+**A több gondolkodás nem pontosabb ítéletet hozott, hanem kidolgozottabb
+indoklást egy rossz kerethez.** A `high` több helyet ad (13 vs 9), csak nem
+mindig a jókat.
+
+Tanulság a jövőre: a gondolkodási szint emelése NEM biztonságos alapértelmezett
+javítás — futtasd a rácsot, mielőtt emelsz.
+
+Mellékhozam: a `high` első próbálkozásra eltörte a rendszert, mert az OpenAI
+reasoning-modelleknél a `max_completion_tokens` a gondolkodási tokeneket is
+beleszámolja. A gondolkodási tartalék azóta a kimeneti kereten FELÜL jár
+(`REASONING_HEADROOM`). Emiatt vált szét a szint capability-nként is: a
+`normalize` `low`-on fut (strukturált kinyerés, nem ítélet), így a `discover`
+végpont 20,6 mp — a `queryBuild` 33-47 mp mellett bőven belefér a 120 mp-be.
+
 ### Maradék 2 bukás (mindkettő gyártásmérnök, mindkettő G2)
 
 A 3. javítás enyhén túlkorrigált: az ágazati rangsorolás rövidebb listákat
