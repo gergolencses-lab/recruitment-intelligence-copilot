@@ -52,4 +52,19 @@ const polandAcme = await gatherSynthetic("Acme Kft", {
 ok("PL-only geo_scope + Acme Kft → insiderek túlélik a szűrést", polandAcme.some((c) => c.current_company === "Acme Kft"));
 ok("PL-only + Acme Kft → teljes pool + insiderek = 17", polandAcme.length === 17);
 
+// 6) A geo_scope.country mezőt a live LLM magyarul írja (pl. "Magyarország") — a szűrésnek
+// ezt is fel kell ismernie, nem csak az angol elnevezéseket.
+const hungarianNames = await gatherSynthetic("", {
+  catchment_places: [{ place: "Budapest", country: "Magyarország", cross_border: false, note: "anchor, magyar nyelvű ország-mező" }],
+});
+ok("Magyar nyelvű ország-mező ('Magyarország') → csak magyar helyszínű jelöltek (nem esik vissza a teljes poolra)", hungarianNames.length > 0 && hungarianNames.length < 17 && hungarianNames.every((c) => c.location.trim().toUpperCase().endsWith("HU")));
+
+const hungarianMulti = await gatherSynthetic("", {
+  catchment_places: [
+    { place: "Győr", country: "Magyarország", cross_border: false, note: "anchor" },
+    { place: "Dunaszerdahely", country: "Szlovákia", cross_border: true, note: "határon-átnyúló" },
+  ],
+});
+ok("Magyar nyelvű 'Szlovákia' is felismerve → SK jelölt is bekerül", hungarianMulti.some((c) => c.location.trim().toUpperCase().endsWith("SK")));
+
 console.log("\nsyntheticReach geo-szűrés teszt kész.");

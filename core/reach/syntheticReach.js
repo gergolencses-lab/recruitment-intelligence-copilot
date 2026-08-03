@@ -193,11 +193,17 @@ function clientInsiders(client) {
 
 const COUNTRY_NAME_TO_CODE = {
   hungary: "HU",
+  magyarország: "HU",
   poland: "PL",
+  lengyelország: "PL",
   czechia: "CZ",
   "czech republic": "CZ",
+  csehország: "CZ",
+  csehia: "CZ",
   romania: "RO",
+  románia: "RO",
   slovakia: "SK",
+  szlovákia: "SK",
 };
 
 function countryCodeOf(location) {
