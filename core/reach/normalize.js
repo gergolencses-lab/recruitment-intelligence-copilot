@@ -67,7 +67,10 @@ export async function normalizeHits(hits, geoScope) {
         .join("\n\n");
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const out = await think({ task: EXTRACT_TASK, input, maxTokens: 6000, temperature: 0.2 });
+        // Ez strukturált kinyerés a találatokból, nem ítéletalkotás — a mély
+        // gondolkodás itt csak időt és pénzt visz, ráadásul a discover így
+        // beleférne a szerverless időkeretbe (a queryBuild marad "high").
+        const out = await think({ task: EXTRACT_TASK, input, maxTokens: 6000, temperature: 0.2, effort: "low" });
         for (const c of out.candidates || []) extracted[c.ref] = c;
         break;
       } catch (e) {

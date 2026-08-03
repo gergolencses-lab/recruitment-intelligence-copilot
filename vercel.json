@@ -3,10 +3,13 @@
   "functions": {
     "api/index.js": {
       "includeFiles": "app/public/**",
-      "maxDuration": 60
+      "maxDuration": 120
     }
   },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/api" }
+    {
+      "source": "/(.*)",
+      "destination": "/api"
+    }
   ]
 }

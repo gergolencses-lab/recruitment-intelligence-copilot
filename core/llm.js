@@ -42,8 +42,10 @@ const OUTPUT_CONTRACT =
  * @param {number} [p.temperature] - megtartva a hívói kompatibilitásért; egyik
  *   szolgáltatónál sem küldjük ki, mert a reasoning-modellek nem fogadják.
  * @param {string} [p.model] - felülírja a konfigurált modellt (pl. értékeléshez)
+ * @param {string} [p.effort] - felülírja a gondolkodási szintet erre a hívásra.
+ *   Mechanikus kinyeréshez (normalize) fölösleges a mély gondolkodás: lassú és drága.
  */
-export async function think({ task, input, maxTokens = 6000, temperature, model }) {
+export async function think({ task, input, maxTokens = 6000, temperature, model, effort }) {
   if (!brainAvailable()) {
     const e = new Error(
       `NO_BRAIN: nincs ${config.llmProvider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY"} — demo-mód aktív.`
@@ -54,7 +56,7 @@ export async function think({ task, input, maxTokens = 6000, temperature, model 
   const user = input + OUTPUT_CONTRACT;
   const text =
     config.llmProvider === "openai"
-      ? await callOpenAI({ task, user, maxTokens, model })
+      ? await callOpenAI({ task, user, maxTokens, model, effort })
       : await callAnthropic({ task, user, maxTokens, model });
   return parseJson(text);
 }
@@ -74,8 +76,24 @@ async function callAnthropic({ task, user, maxTokens, model }) {
     .join("");
 }
 
-async function callOpenAI({ task, user, maxTokens, model }) {
+// Az OpenAI reasoning-modelleknél a max_completion_tokens a GONDOLKODÁSI
+// tokeneket is beleszámolja, nem csak a látható kimenetet. A hívó maxTokens
+// értéke a kimenet kerete; a gondolkodásnak ezen FELÜL kell hely. Enélkül
+// "high" szinten a gondolkodás felemészti a keretet, és a JSON csonka lesz
+// (mérve: high és xhigh is elhasalt 6000-rel).
+const REASONING_HEADROOM = {
+  none: 0,
+  low: 4000,
+  medium: 8000,
+  high: 20000,
+  xhigh: 40000,
+  max: 80000,
+};
+
+async function callOpenAI({ task, user, maxTokens, model, effort: effortOverride }) {
   const c = openaiClient();
+  const effort = effortOverride || config.openaiReasoningEffort;
+  const budget = maxTokens + (REASONING_HEADROOM[effort] ?? 8000);
   // A persona külön, ELSŐ system-üzenet: az OpenAI automatikus prefix-cache-e
   // így ismeri fel az állandó előtagot (a Knowledge Core minden hívásban azonos),
   // és a bemenet 10%-os áron számlázódik. Ezért nem fűzzük a task-hoz.
@@ -89,8 +107,8 @@ async function callOpenAI({ task, user, maxTokens, model }) {
     // Szolgáltatói garancia érvényes JSON-ra. Ez pont az a hibaosztály, ami a
     // korábbi éles futásokban a rankTargets-et elvitte (malformed JSON, retry nélkül).
     response_format: { type: "json_object" },
-    max_completion_tokens: maxTokens,
-    reasoning_effort: config.openaiReasoningEffort,
+    max_completion_tokens: budget,
+    reasoning_effort: effort,
   };
 
   let resp;
@@ -114,7 +132,11 @@ async function callOpenAI({ task, user, maxTokens, model }) {
   const choice = resp.choices && resp.choices[0];
   // Csonka JSON-t ne adjunk tovább némán a parsernek: mondjuk ki, mi történt.
   if (choice && choice.finish_reason === "length") {
-    throw new Error(`Az LLM-válasz elérte a token-korlátot (${maxTokens}) — a JSON csonka.`);
+    throw new Error(
+      `Az LLM-válasz elérte a token-korlátot (${budget}: ${maxTokens} kimenet + ` +
+      `${budget - maxTokens} gondolkodási tartalék, effort=${effort}) — a JSON csonka. ` +
+      `Emeld a REASONING_HEADROOM értékét, vagy vidd lejjebb a gondolkodási szintet.`
+    );
   }
   return (choice && choice.message && choice.message.content) || "";
 }

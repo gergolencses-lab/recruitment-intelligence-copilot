@@ -1,0 +1,10 @@
+import { queryBuild } from "./core/capabilities.js";
+import { config } from "./core/config.js";
+const brief="Gyártásmérnököt keresünk a présüzem folyamatfejlesztésére. Elvárás: gépészmérnök diploma, min. 5 év autóipari tapasztalat, IATF 16949, tárgyalóképes angol.";
+const pos={title:"Gyártásmérnök",client:"",location:"Győr",work_mode:"helyszíni",seniority:"senior"};
+const t0=Date.now(); const out=await queryBuild({brief,position:pos}); const ms=Date.now()-t0;
+const g=out.geo_scope;
+console.log(`effort=${config.openaiReasoningEffort}  idő=${(ms/1000).toFixed(1)} mp`);
+console.log(`  rugalmasság: ${g?.search_elasticity}`);
+console.log(`  helyek (${(g?.catchment_places||[]).length}): ${(g?.catchment_places||[]).map(p=>p.place).join(", ")}`);
+console.log(`  szűk: ${(out.firecrawl_search_queries||[]).length} db, tág: ${(out.firecrawl_search_queries_broad||[]).length} db`);
