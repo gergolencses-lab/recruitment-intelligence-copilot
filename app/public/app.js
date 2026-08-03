@@ -1124,6 +1124,8 @@ function renderQuery(p) {
   const out = $("#queryOut");
   if (!o) { if (p.intake) out.innerHTML = ""; return; }
   const edited = !!o._edited_by_recruiter;
+  const gs = o.geo_scope;
+  const elasticityLabel = { tight: "szűk (helyi)", moderate: "közepes (régiós)", loose: "tág (országos/nemzetközi)" };
   out.innerHTML = `
     <div class="card">
       <h4>Keresési terv ${demoTag(o)} ${edited ? `<span class="ai-status ok">Recruiter által szerkesztve</span>` : `<span class="ai-status">AI-javaslat — szerkeszthető</span>`}</h4>
@@ -1131,6 +1133,11 @@ function renderQuery(p) {
       <div class="cov-label" style="margin-top:10px">Célpozíciók</div>${chipEditor("qTitles", o.target_titles, { placeholder: "Új célpozíció…" })}
       <div class="cov-label" style="margin-top:12px">Célcégek</div>${chipEditor("qCompanies", o.target_companies, { placeholder: "Új célcég…" })}
       <div class="cov-label" style="margin-top:12px">Kulcs-szinonimák</div>${chipEditor("qSyn", o.synonyms, { placeholder: "Új szinonima…" })}
+      ${gs ? `
+      <div class="cov-label" style="margin-top:12px">Földrajzi hatókör <span class="chip">${esc(elasticityLabel[gs.search_elasticity] || gs.search_elasticity)}</span></div>
+      ${chips((gs.catchment_places || []).map((c) => c.cross_border ? `${c.place} (${c.country})` : c.place))}
+      ${gs.rationale ? `<p class="kpi-desc" style="margin-top:4px">${esc(gs.rationale)}</p>` : ""}
+      ` : ""}
       <details class="or-why" id="qDetails"${detailsOpen("qDetails")} style="margin-top:12px"><summary>Keresési lekérdezések (szerkeszthető)</summary>
         <div class="cov-label" style="margin-top:8px">Boolean / X-ray lekérdezések</div>
         ${(o.boolean_queries || []).map((q, i) => `<div class="q-row"><div class="q-plat">${esc(q.platform || "egyéb")}</div><textarea class="q-code q-edit" data-qi="${i}" rows="2">${esc(q.query || "")}</textarea><button class="btn ed-x-btn" data-qrm="${i}" title="Lekérdezés törlése">×</button></div>`).join("")
@@ -1138,6 +1145,10 @@ function renderQuery(p) {
         <div class="ed-add q-add"><input class="ed-in" id="qBoolNew" placeholder="Új boolean lekérdezés…" /><button class="btn" id="qBoolAdd">+</button></div>
         <div class="cov-label" style="margin-top:14px">Webes kereső-lekérdezések</div>
         ${chipEditor("qWeb", o.firecrawl_search_queries, { placeholder: "Új webes lekérdezés…" })}
+        ${(o.firecrawl_search_queries_broad || []).length ? `
+        <div class="cov-label" style="margin-top:14px">Tág kör (automatikus tartalék, ha a szűk kör kevés találatot hoz)</div>
+        ${(o.firecrawl_search_queries_broad || []).map((q) => `<code class="q-code">${esc(q)}</code>`).join("")}
+        ` : ""}
       </details>
     </div>`;
   wireDetails("qDetails");
@@ -1473,6 +1484,12 @@ function candMatches(p, x, f, withState) {
   }
   return true;
 }
+function geoFitChip(geoFit) {
+  if (!geoFit || geoFit === "unknown") return "";
+  const cls = geoFit === "in_scope" ? "good" : geoFit === "out_of_scope" ? "bad" : "warn";
+  const label = geoFit === "in_scope" ? "helyszín: AI-terv szerint illeszkedik" : geoFit === "out_of_scope" ? "helyszín: AI-terv szerint eltér" : "helyszín: AI-terv szerint bizonytalan";
+  return `<span class="chip ${cls}">${esc(label)}</span>`;
+}
 function candCardHtml(p, x) {
   const t = effTier(p, x.id);
   const ov = p.priority_overrides[x.id];
@@ -1488,6 +1505,7 @@ function candCardHtml(p, x) {
     <div class="bcard-name">${esc(x.name)}</div>
     <div class="bcard-meta">${esc(x.headline || "")}</div>
     <div class="bcard-meta dim">${esc([x.current_company, x.location].filter(Boolean).join(" · "))}</div>
+    ${geoFitChip(x.geo_fit)}
     <div class="bcard-chips">${candStateChips(p, x)}<span class="chip">${strongCount(x)} erős jel</span></div>
     <div class="bcard-next">${esc(candNext(p, x))}</div>
   </div>`;
@@ -1501,7 +1519,7 @@ function candRowHtml(p, x) {
       ${["A", "B", "C", "D"].map((k) => `<option value="${k}" ${t === k ? "selected" : ""}>${k}</option>`).join("")}
     </select>
     <div><div class="crow-name">${esc(x.name)}</div><div class="crow-head">${esc(x.headline || "")}</div></div>
-    <div class="crow-meta">${esc(x.current_company || "")}${x.location ? "<br>" + esc(x.location) : ""}</div>
+    <div class="crow-meta">${esc(x.current_company || "")}${x.location ? "<br>" + esc(x.location) : ""}${geoFitChip(x.geo_fit) ? "<br>" + geoFitChip(x.geo_fit) : ""}</div>
     <div class="crow-meta">${srcLabel(x.source_type)}<br><span class="mut">${strongCount(x)} erős jel</span>${ov ? `<br><span class="mut" style="font-size:10px">kézzel állítva</span>` : ""}</div>
     <div class="crow-state">${candStateChips(p, x)}<div class="mut" style="margin-top:3px">Következő: ${candNext(p, x)}</div></div>
     <button class="btn crow-open" data-id="${esc(x.id)}">Részletek</button>
@@ -1758,7 +1776,7 @@ function renderDrawer(p, c) {
     <div class="d-sec"><h5>Profil</h5>
       <div class="crow-name">${esc(c.name)}</div>
       <div class="crow-head">${esc(c.headline || "")}</div>
-      <div class="crow-meta" style="margin-top:4px">${[c.current_company, c.location].filter(Boolean).map(esc).join(" · ")}</div>
+      <div class="crow-meta" style="margin-top:4px">${[c.current_company, c.location].filter(Boolean).map(esc).join(" · ")} ${geoFitChip(c.geo_fit)}</div>
       ${(c.past_companies || []).length ? `<div class="crow-meta" style="margin-top:2px">Korábban: ${(c.past_companies || []).map(esc).join(" · ")}</div>` : ""}
       <div class="row" style="margin-top:8px">
         <label style="font-size:12px">Prioritás:</label>

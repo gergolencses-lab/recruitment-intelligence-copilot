@@ -2,11 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace `queryBuild`'s flat, overspecified single-tier query list with a narrow/broad tiered plan plus an evidence-grounded `geo_scope` (elasticity-calibrated catchment), and thread that through the Reach Engine (adaptive broadening, geo-fit tagging), ranking, and both surfaces (web app + MCP) so search neither over- nor under-specifies, and geography is reasoned about rather than ignored.
+**Goal:** Add a narrow/broad query-tier fallback plus an evidence-grounded, elasticity-calibrated `geo_scope` to `queryBuild`'s output, additively (no breaking changes to the existing chat-editable `firecrawl_search_queries` field or the client-exclusion feature), and thread both through the Reach Engine (adaptive broadening, geo-fit tagging), ranking, and both surfaces (web app + MCP).
 
-**Architecture:** `queryBuild` now emits `geo_scope` (search_elasticity + named catchment places, no invented precision) and `search_tiers` (narrow = all must-haves ANDed, broad = core signal only). `reachEngine.discover()` runs the narrow tier first, adaptively fires the broad tier only if raw hits are thin (config-gated threshold), then scrapes+normalizes once on the merged set. `normalize.js` tags each candidate's `geo_fit` against the whole `geo_scope` object (not list lookup). `syntheticReach.js` filters the fixed demo pool deterministically by country instead of ignoring location. `rankTargets` receives `location`/`geo_fit` as explicit ranking input.
+**Architecture:** `queryBuild` keeps its existing `firecrawl_search_queries` field (narrow tier, unchanged, still chat-editable) and adds two new fields: `firecrawl_search_queries_broad` (broad tier, read-only, automatic fallback) and `geo_scope` (search_elasticity + named catchment places, no invented precision, read-only). `reachEngine.discover()` runs the narrow tier first, adaptively fires the broad tier only if raw hits are thin, then scrapes+normalizes once on the merged set. `normalize.js` tags each candidate's `geo_fit` against the whole `geo_scope` object. `syntheticReach.js` filters the fixed demo pool deterministically by country. `rankTargets` receives `location`/`geo_fit` as explicit ranking input. The existing client-exclusion feature (`exclude_companies`, `past_companies`, `client` param, injected synthetic "insider" candidates) is untouched throughout.
 
 **Tech Stack:** Node.js (ESM), Express, `@anthropic-ai/sdk`, `@modelcontextprotocol/sdk`, zero test framework — this repo tests via plain `node scripts/*.js` assertion scripts (`ok(name, cond)` pattern), not jest/vitest. Follow that convention; do not introduce a test framework.
+
+## ⚠️ Important: this plan replaced an earlier version
+
+An earlier version of this plan was written against a stale snapshot of the repo (a `search_tiers` nested-array design). Before dispatching Task 1, the controller discovered 9 new commits had landed on `main` in the meantime — a client-exclusion feature and a chat-driven "strategy assistant" that hardcodes `firecrawl_search_queries` as a flat, chat-editable field in three places. The nested design would have silently broken that feature. This version is corrected and verified against the actual current file contents (quoted verbatim in each task below) as of branch `search-geo-tiering`. **Do not reuse code blocks from any earlier draft of this plan — use only what's written in this file.**
 
 ## Global Constraints
 
@@ -14,7 +18,9 @@
 - `search_elasticity` is derived from role scarcity/seniority, never from `work_mode` alone, never by mirroring place-list length or border-crossing.
 - The anchor location (`position.location`) must always appear in `geo_scope.catchment_places`, regardless of elasticity.
 - `loose` elasticity must still name real places — an empty `catchment_places` is not an acceptable output.
-- No backwards-compatibility shims for the old flat `firecrawl_search_queries` shape — every caller in this repo is updated in this same plan (per user preference: no compat hacks when you can just change the code).
+- `firecrawl_search_queries` (existing field) keeps its exact name and meaning (narrow tier) — do not rename or restructure it. It remains the field the chat-driven strategy assistant edits.
+- The existing client-exclusion feature (`exclude_companies`, `exclusion_note`, `past_companies`, the `client` parameter flowing through `discoverCandidates`/`discover`/`gatherSynthetic`, the injected synthetic "insider" candidates) must keep working identically — every task that touches a function carrying `client` must preserve that parameter.
+- No backwards-compatibility shims — every caller of a changed function signature in this repo is updated in this same plan.
 - All new/changed Hungarian prompt text follows the existing `LANG` constant convention in `core/capabilities.js` (natural Hungarian, no marketing language, fact/inference/assumption kept separate).
 
 ---
@@ -24,30 +30,30 @@
 | File | Responsibility |
 |---|---|
 | `core/config.js` | + `reachBroadenThreshold` |
-| `core/reach/syntheticReach.js` | Deterministic geo-filtering of the fixed demo pool |
+| `core/reach/syntheticReach.js` | + deterministic geo-filtering of the fixed demo pool, alongside the existing client-insider injection |
 | `core/reach/normalize.js` | + per-candidate `geo_fit` classification against `geo_scope` |
 | `core/reach/firecrawlReach.js` | Split `gatherHits` into `searchHits` (search-only) + `scrapeTopHits` (scrape-only), so broadening never double-scrapes |
-| `core/reach/reachEngine.js` | `discover()` orchestrates narrow→(maybe broad)→scrape-once→normalize |
-| `core/capabilities.js` | `queryBuild` new schema, `discoverCandidates` passthrough, `rankTargets` geo-aware input |
-| `core/demo.js` | `queryBuild` demo fallback matches new schema |
-| `app/server.js` | `/discover` route reads `search_tiers`/`geo_scope` |
+| `core/reach/reachEngine.js` | `discover()` orchestrates narrow→(maybe broad)→scrape-once→normalize, preserving `client` passthrough |
+| `core/capabilities.js` | `queryBuild` gains `firecrawl_search_queries_broad` + `geo_scope`; `discoverCandidates` passes them through; `rankTargets` gets geo-aware input |
+| `core/demo.js` | `queryBuild` demo fallback matches the new additive fields |
+| `app/server.js` | `/discover` route reads the two new `p.query` fields |
 | `mcp/server.js` | `query_build`/`discover_candidates` tool schemas match |
-| `scripts/smoke.js`, `scripts/test-mcp.js` | Updated to new shapes |
-| `app/public/app.js` | `geo_scope` display block, `geo_fit` badges |
+| `scripts/smoke.js` | Updated to the new fields |
+| `app/public/app.js` | `geo_scope` + broad-tier read-only display, `geo_fit` badges |
 
 ---
 
 ### Task 1: `config.js` — add `reachBroadenThreshold`
 
 **Files:**
-- Modify: `core/config.js:38-40`
+- Modify: `core/config.js`
 
 **Interfaces:**
 - Produces: `config.reachBroadenThreshold` (number) — consumed by Task 5 (`reachEngine.js`).
 
 - [ ] **Step 1: Edit `core/config.js`**
 
-Find this block (lines 38-40):
+Find this block:
 
 ```js
   reachSearchLimit: parseInt(process.env.REACH_SEARCH_LIMIT || "6", 10),
@@ -78,17 +84,17 @@ git commit -m "config: add reachBroadenThreshold for adaptive search broadening"
 
 ---
 
-### Task 2: `syntheticReach.js` — deterministic geo-filtering of the demo pool
+### Task 2: `syntheticReach.js` — deterministic geo-filtering alongside client-insider injection
 
 **Files:**
 - Modify: `core/reach/syntheticReach.js`
 - Test: `scripts/test-synthetic-geo.js` (new)
 
 **Interfaces:**
-- Consumes: nothing new (pure module).
-- Produces: `gatherSynthetic(geoScope)` — signature changes from `gatherSynthetic()` to `gatherSynthetic(geoScope)`. `geoScope` shape: `{ catchment_places: [{ place, country, cross_border, note }], ... }` or `null`/`undefined`. Consumed by Task 5 (`reachEngine.js`).
+- Consumes: nothing new.
+- Produces: `gatherSynthetic(client, geoScope)` — signature changes from `gatherSynthetic(client)` by adding a second parameter. `geoScope` shape: `{ catchment_places: [{ place, country, cross_border, note }], ... }` or `null`/`undefined`. Consumed by Task 5 (`reachEngine.js`).
 
-The 14 fixed profiles use `"City, XX"` / `"City/Remote, XX"` locations with country codes `HU`, `PL`, `CZ`, `RO`, `SK` (confirmed by reading the full pool). `geo_scope.catchment_places[].country` will contain full country names (e.g. `"Hungary"`, `"Slovakia"`) per the validated prompt design — so filtering needs a small name→code map for exactly those 5 countries. Fail open (don't filter) whenever a location or country can't be confidently parsed, and fail open to the full pool if the geo-filtered set is too thin (< 3) — a demo must never go to zero candidates.
+The current file (verified — do not assume any other shape) builds a 14-entry base `POOL` (locations use `"City, XX"` / `"City/Remote, XX"` suffixes, country codes `HU`/`PL`/`CZ`/`RO`/`SK`), then via `clientInsiders(client)` generates 3 more Budapest-based candidates tied to the given client name (a deliberate exclusion-feature test fixture) and splices them into the pool at fixed positions, for **17 total**. `geo_scope.catchment_places[].country` will contain full country names (e.g. `"Hungary"`, `"Slovakia"`) per the validated prompt design — filtering needs a small name→code map for exactly those 5 countries. Fail open (don't filter) whenever a location or country can't be confidently parsed, and fail open to the full 17-candidate pool if the geo-filtered set is too thin (< 3) — a demo must never go to zero candidates.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -96,6 +102,7 @@ Create `scripts/test-synthetic-geo.js`:
 
 ```js
 // Egységteszt: syntheticReach determinisztikus geo-szűrése (nincs API-hívás).
+// A client-alapú "insider" injektálás (kizárás-funkció) a geo-szűréstől függetlenül működik tovább.
 import { gatherSynthetic } from "../core/reach/syntheticReach.js";
 
 function ok(name, cond) {
@@ -103,19 +110,23 @@ function ok(name, cond) {
   if (!cond) process.exitCode = 1;
 }
 
-// 1) Nincs geo_scope → visszaadja az összes 14 mintajelöltet (jelenlegi viselkedés megmarad).
-const all = await gatherSynthetic(null);
-ok("geoScope nélkül → mind a 14 minta visszajön", all.length === 14);
+// 1) Nincs geoScope → mind a 17 jelölt visszajön (14 alap + 3 client-insider) — a meglévő viselkedés megmarad.
+const all = await gatherSynthetic("", null);
+ok("geoScope nélkül → mind a 17 jelölt visszajön (14 alap + 3 insider)", all.length === 17);
 
-// 2) Szűk (HU-only) geo_scope → csak HU-jelöltek jönnek vissza, és kevesebb, mint 14.
-const huOnly = await gatherSynthetic({
+// 2) A client-alapú insider-injektálás (kizárás-funkció) NEM sérül a geo-szűréstől.
+const withClient = await gatherSynthetic("Acme Kft", null);
+ok("client paraméter → változatlanul beszúrja a nevesített insider jelölteket", withClient.some((c) => c.current_company === "Acme Kft"));
+
+// 3) Szűk (HU-only) geo_scope → csak HU-jelöltek jönnek vissza, kevesebb, mint 17.
+const huOnly = await gatherSynthetic("", {
   catchment_places: [{ place: "Budapest", country: "Hungary", cross_border: false, note: "anchor" }],
 });
 ok("HU-only geo_scope → csak magyar helyszínű jelöltek", huOnly.every((c) => c.location.trim().toUpperCase().endsWith("HU")));
-ok("HU-only geo_scope → szűkebb, mint a teljes pool", huOnly.length > 0 && huOnly.length < 14);
+ok("HU-only geo_scope → szűkebb, mint a teljes pool", huOnly.length > 0 && huOnly.length < 17);
 
-// 3) Több ország (HU + SK) → legalább egy SK jelölt is bekerül.
-const huSk = await gatherSynthetic({
+// 4) Több ország (HU + SK) → legalább egy SK jelölt is bekerül.
+const huSk = await gatherSynthetic("", {
   catchment_places: [
     { place: "Budapest", country: "Hungary", cross_border: false, note: "anchor" },
     { place: "Bratislava", country: "Slovakia", cross_border: true, note: "cross-border" },
@@ -123,11 +134,11 @@ const huSk = await gatherSynthetic({
 });
 ok("HU+SK geo_scope → tartalmaz SK jelöltet", huSk.some((c) => c.location.trim().toUpperCase().endsWith("SK")));
 
-// 4) Ha a szűrt halmaz túl vékony (<3), essen vissza a teljes poolra (soha ne legyen üres demo).
-const nothingMatches = await gatherSynthetic({
+// 5) Ha a szűrt halmaz túl vékony (<3), essen vissza a teljes poolra (soha ne legyen üres demo).
+const nothingMatches = await gatherSynthetic("", {
   catchment_places: [{ place: "Reykjavik", country: "Iceland", cross_border: false, note: "no match in pool" }],
 });
-ok("Nincs egyező ország → visszaesik a teljes poolra (fail-open)", nothingMatches.length === 14);
+ok("Nincs egyező ország → visszaesik a teljes (17-es) poolra (fail-open)", nothingMatches.length === 17);
 
 console.log("\nsyntheticReach geo-szűrés teszt kész.");
 ```
@@ -135,11 +146,11 @@ console.log("\nsyntheticReach geo-szűrés teszt kész.");
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `node scripts/test-synthetic-geo.js`
-Expected: throws or fails, because `gatherSynthetic` doesn't accept a `geoScope` argument yet and does no filtering.
+Expected: fails (current `gatherSynthetic` only takes `client`, does no geo filtering — assertions 3/4/5 fail).
 
 - [ ] **Step 3: Implement the filtering**
 
-In `core/reach/syntheticReach.js`, add before the `let seq = 0;` line (currently line 147):
+In `core/reach/syntheticReach.js`, add immediately before the `const stamp = (c) => ({` line:
 
 ```js
 const COUNTRY_NAME_TO_CODE = {
@@ -176,65 +187,44 @@ const MIN_SYNTHETIC_RESULTS = 3;
 Then replace the existing `gatherSynthetic` function:
 
 ```js
-let seq = 0;
-export async function gatherSynthetic() {
-  seq = 0;
-  return POOL.map((c) => {
-    seq += 1;
-    return {
-      ...c,
-      id: `syn-${String(seq).padStart(3, "0")}`,
-      synthetic: true,
-      source_url: null,
-      source_type: "synthetic",
-      art14_status: "n/a (mintaadat)",
-      provenance: {
-        method: "synthetic-pool",
-        query: null,
-        fetched_at: new Date().toISOString(),
-      },
-    };
-  });
+export async function gatherSynthetic(client) {
+  const pool = POOL.map((c, i) => stamp({ ...c, id: `syn-${String(i + 1).padStart(3, "0")}` }));
+  const ins = clientInsiders(client).map(stamp);
+  // Szétszórva, nem a lista végén: így a prioritási javaslat is felveszi őket,
+  // és látszik, hogy a kizárás valódi, magas prioritású találatokat fog meg.
+  pool.splice(1, 0, ins[0]);
+  pool.splice(4, 0, ins[1]);
+  pool.splice(7, 0, ins[2]);
+  return pool;
 }
 ```
 
 with:
 
 ```js
-let seq = 0;
-export async function gatherSynthetic(geoScope) {
-  seq = 0;
-  const geoFiltered = POOL.filter((c) => matchesGeo(c, geoScope));
-  const chosen = geoFiltered.length >= MIN_SYNTHETIC_RESULTS ? geoFiltered : POOL;
-  return chosen.map((c) => {
-    seq += 1;
-    return {
-      ...c,
-      id: `syn-${String(seq).padStart(3, "0")}`,
-      synthetic: true,
-      source_url: null,
-      source_type: "synthetic",
-      art14_status: "n/a (mintaadat)",
-      provenance: {
-        method: "synthetic-pool",
-        query: null,
-        fetched_at: new Date().toISOString(),
-      },
-    };
-  });
+export async function gatherSynthetic(client, geoScope) {
+  const pool = POOL.map((c, i) => stamp({ ...c, id: `syn-${String(i + 1).padStart(3, "0")}` }));
+  const ins = clientInsiders(client).map(stamp);
+  // Szétszórva, nem a lista végén: így a prioritási javaslat is felveszi őket,
+  // és látszik, hogy a kizárás valódi, magas prioritású találatokat fog meg.
+  pool.splice(1, 0, ins[0]);
+  pool.splice(4, 0, ins[1]);
+  pool.splice(7, 0, ins[2]);
+  const geoFiltered = pool.filter((c) => matchesGeo(c, geoScope));
+  return geoFiltered.length >= MIN_SYNTHETIC_RESULTS ? geoFiltered : pool;
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node scripts/test-synthetic-geo.js`
-Expected: all 5 `✅` lines, exit code 0.
+Expected: all 6 `✅` lines, exit code 0.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add core/reach/syntheticReach.js scripts/test-synthetic-geo.js
-git commit -m "reach: synthetic pool filters by geo_scope instead of ignoring location"
+git commit -m "reach: synthetic pool filters by geo_scope, alongside existing client-insider injection"
 ```
 
 ---
@@ -245,12 +235,12 @@ git commit -m "reach: synthetic pool filters by geo_scope instead of ignoring lo
 - Modify: `core/reach/normalize.js`
 
 **Interfaces:**
-- Consumes: nothing new from earlier tasks.
-- Produces: `normalizeHits(hits, geoScope)` — signature changes from `normalizeHits(hits)`. Adds `geo_fit: "in_scope" | "adjacent" | "out_of_scope" | "unknown" | null` to each returned candidate record. Consumed by Task 5 (`reachEngine.js`).
+- Consumes: nothing new.
+- Produces: `normalizeHits(hits, geoScope)` — signature changes from `normalizeHits(hits)`. Adds `geo_fit: "in_scope" | "adjacent" | "out_of_scope" | "unknown" | null` to each returned candidate record, alongside the existing `past_companies` field (used by the client-exclusion feature — do not remove it). Consumed by Task 5 (`reachEngine.js`).
 
 - [ ] **Step 1: Edit the extraction schema and prompt**
 
-In `core/reach/normalize.js`, replace the `EXTRACT_TASK` constant (current lines 19-36):
+In `core/reach/normalize.js`, replace the `EXTRACT_TASK` constant:
 
 ```js
 const EXTRACT_TASK = `FELADAT: Nyers webes találatokból strukturálj passzív jelölt-rekordokat egy fejvadász-kutatáshoz (senior tech / CEE).
@@ -266,6 +256,7 @@ Kimeneti séma:
       "name": "<név vagy null>",
       "headline": "<jelenlegi szerep/pozíció rövid leírása vagy null>",
       "current_company": "<cég vagy null>",
+      "past_companies": ["<korábbi munkáltató, ha a szövegből EVIDENCIÁLISAN kiolvasható — különben üres tömb>"],
       "location": "<város/ország vagy null>",
       "signals": [ { "signal": "<konkrét szakmai jel a szövegből>", "strength": "erős|közepes|gyenge" } ]
     }
@@ -296,6 +287,7 @@ Kimeneti séma:
       "name": "<név vagy null>",
       "headline": "<jelenlegi szerep/pozíció rövid leírása vagy null>",
       "current_company": "<cég vagy null>",
+      "past_companies": ["<korábbi munkáltató, ha a szövegből EVIDENCIÁLISAN kiolvasható — különben üres tömb>"],
       "location": "<város/ország vagy null>",
       "geo_fit": "in_scope|adjacent|out_of_scope|unknown|null",
       "signals": [ { "signal": "<konkrét szakmai jel a szövegből>", "strength": "erős|közepes|gyenge" } ]
@@ -306,7 +298,7 @@ Kimeneti séma:
 
 - [ ] **Step 2: Thread `geoScope` through `normalizeHits` and the input builder**
 
-Replace the `export async function normalizeHits(hits) {` line and the `input` construction inside it (current lines 38-51):
+Replace:
 
 ```js
 export async function normalizeHits(hits) {
@@ -360,9 +352,10 @@ export async function normalizeHits(hits, geoScope) {
 
 - [ ] **Step 3: Include `geo_fit` in the returned candidate record**
 
-Find the return object inside `normalizeHits`'s final `.map` (current lines 59-84, the `return { id: idFor(...), ... }` block). Locate this line:
+Find this line in the final `.map` inside `normalizeHits`:
 
 ```js
+      past_companies: Array.isArray(e.past_companies) ? e.past_companies.filter(Boolean) : [],
       location: e.location || null,
       is_person: e.is_person !== false,
 ```
@@ -370,6 +363,7 @@ Find the return object inside `normalizeHits`'s final `.map` (current lines 59-8
 Replace with:
 
 ```js
+      past_companies: Array.isArray(e.past_companies) ? e.past_companies.filter(Boolean) : [],
       location: e.location || null,
       geo_fit: e.geo_fit || null,
       is_person: e.is_person !== false,
@@ -382,7 +376,7 @@ This function only produces `geo_fit` when `brainAvailable()` is true (live mode
 Run: `node -e "import('./core/reach/normalize.js').then(m => console.log(typeof m.normalizeHits))"`
 Expected: `function`
 
-The end-to-end live-mode check happens in Task 16.
+The end-to-end live-mode check happens in Task 15.
 
 - [ ] **Step 5: Commit**
 
@@ -402,9 +396,11 @@ git commit -m "reach: normalize.js classifies geo_fit per candidate against geo_
 - Consumes: nothing new.
 - Produces: `searchHits(queries, { onProgress })` (search-only, returns hit objects with empty `excerpt`) and `scrapeTopHits(hits, { onProgress })` (mutates/returns the same array with `excerpt` filled for the top `config.reachScrapeTop` scrapable hits). Replaces the single `gatherHits` export. Consumed by Task 5 (`reachEngine.js`) — this split lets the engine decide whether to broaden *before* paying the scrape cost, and scrape only once on the merged set.
 
+This file was **not** touched by the upstream commits that landed since the original repo exploration (confirmed via `git diff --stat`) — the code below is accurate as-is.
+
 - [ ] **Step 1: Replace `gatherHits` with two functions**
 
-In `core/reach/firecrawlReach.js`, replace the entire `gatherHits` function (current lines 67-108):
+In `core/reach/firecrawlReach.js`, replace the entire `gatherHits` function:
 
 ```js
 /**
@@ -524,17 +520,69 @@ git commit -m "reach: split gatherHits into searchHits + scrapeTopHits (scrape-o
 - Test: `scripts/test-reach-tiers.js` (new)
 
 **Interfaces:**
-- Consumes: `config.reachBroadenThreshold` (Task 1), `gatherSynthetic(geoScope)` (Task 2), `normalizeHits(hits, geoScope)` (Task 3), `searchHits`/`scrapeTopHits` (Task 4).
-- Produces: `discover({ searchTiers, geoScope, source, onProgress })` — signature changes from `discover({ searchQueries, source, onProgress })`. `searchTiers` shape: `[{ tier: "narrow"|"broad", firecrawl_search_queries: string[] }]`. Consumed by Task 8 (`capabilities.js` `discoverCandidates`).
+- Consumes: `config.reachBroadenThreshold` (Task 1), `gatherSynthetic(client, geoScope)` (Task 2), `normalizeHits(hits, geoScope)` (Task 3), `searchHits`/`scrapeTopHits` (Task 4).
+- Produces: `discover({ searchQueries, broadSearchQueries, geoScope, source, onProgress, client })` — `searchQueries`, `source`, `onProgress`, `client` are existing parameters (preserve `client`'s exact current meaning — it drives the synthetic insider-exclusion test fixture and must keep flowing to `gatherSynthetic`). `broadSearchQueries` and `geoScope` are new. Consumed by Task 7 (`capabilities.js` `discoverCandidates`).
 
-This task can't call live Firecrawl in an automated test (no key in CI/dev by default), so the automated test uses dependency-injection-free unit coverage of the pure tier-lookup helper, and full behavior is exercised via the synthetic path (which Task 2 already made deterministic) plus manual live verification in Task 16.
+The current file (verified — do not assume any other shape):
+
+```js
+// Reach Engine — egységes discovery interfész. A felület nem tudja, mi van mögötte.
+// Ez a "seam", ahova később a residential-proxy / vendor-feed bővítés becsatolható (spec §5).
+import { config, reachLiveAvailable } from "../config.js";
+import { gatherHits } from "./firecrawlReach.js";
+import { gatherSynthetic } from "./syntheticReach.js";
+import { normalizeHits } from "./normalize.js";
+
+function pickSource(requested) {
+  const r = requested || config.reachDefaultSource || "auto";
+  if (r === "synthetic") return "synthetic";
+  if (r === "firecrawl") return reachLiveAvailable() ? "firecrawl" : "synthetic";
+  // auto
+  return reachLiveAvailable() ? "firecrawl" : "synthetic";
+}
+
+/**
+ * @param {object} p
+ * @param {string[]} p.searchQueries - firecrawl keresési lekérdezések (a queryBuild-ból)
+ * @param {string} [p.source] - "auto" | "firecrawl" | "synthetic"
+ * @param {function} [p.onProgress]
+ * @returns {Promise<{source, candidates, note}>}
+ */
+export async function discover({ searchQueries, source, onProgress, client }) {
+  const chosen = pickSource(source);
+
+  if (chosen === "synthetic") {
+    const candidates = await gatherSynthetic(client);
+    return {
+      source: "synthetic",
+      candidates,
+      note:
+        "Mintaadatok (senior tech / CEE) — nem valós személyek. " +
+        "Élő kutatáshoz a nyilvános webes forrás bekapcsolása szükséges (lásd Beállítások / telepítési útmutató).",
+    };
+  }
+
+  onProgress && onProgress("Firecrawl publikus-web discovery indul…");
+  const hits = await gatherHits(searchQueries, { onProgress });
+  onProgress && onProgress(`${hits.length} nyers találat — normalizálás…`);
+  const candidates = await normalizeHits(hits);
+  const persons = candidates.filter((c) => c.is_person !== false);
+  return {
+    source: "firecrawl",
+    candidates: persons,
+    note:
+      `Nyilvános webes források: ${persons.length} jelölt ${hits.length} találatból. ` +
+      "Nincs belépett/fake-account LinkedIn-hozzáférés — a LinkedIn-URL-ek a keresőből, a mélység a nyilvánosan elérhető forrásokból (GitHub, cég-oldal, konferencia-bio, blog).",
+  };
+}
+```
 
 - [ ] **Step 1: Write the failing test**
 
 Create `scripts/test-reach-tiers.js`:
 
 ```js
-// Egységteszt: reachEngine tier-választása és a synthetic-ág geo-átadása (nincs élő API-hívás).
+// Egységteszt: reachEngine tier-választása, geo-átadása és client-passthrough (nincs élő API-hívás).
 import { discover } from "../core/reach/reachEngine.js";
 
 function ok(name, cond) {
@@ -542,24 +590,23 @@ function ok(name, cond) {
   if (!cond) process.exitCode = 1;
 }
 
-// Synthetic ágon a discover() a geoScope-ot változatlanul továbbadja gatherSynthetic-nek,
-// és search_tiers hiányában/üresen sem dob hibát.
+// Synthetic ágon a discover() a geoScope-ot és a client-et is változatlanul továbbadja.
 const res = await discover({
-  searchTiers: [
-    { tier: "narrow", firecrawl_search_queries: ["site:linkedin.com/in staff engineer payments Budapest"] },
-    { tier: "broad", firecrawl_search_queries: ["payments engineer CEE"] },
-  ],
+  searchQueries: ["site:linkedin.com/in staff engineer payments Budapest"],
+  broadSearchQueries: ["payments engineer CEE"],
   geoScope: {
     catchment_places: [{ place: "Budapest", country: "Hungary", cross_border: false, note: "anchor" }],
   },
   source: "synthetic",
+  client: "Acme Kft",
 });
 ok("discover(synthetic) → source visszaadva", res.source === "synthetic");
-ok("discover(synthetic) → geoScope alkalmazva (szűkebb, mint a teljes pool)", res.candidates.length > 0 && res.candidates.length <= 14);
+ok("discover(synthetic) → geoScope alkalmazva (szűkebb, mint a teljes 17-es pool)", res.candidates.length > 0 && res.candidates.length <= 17);
 ok("discover(synthetic) → minden jelölt magyar helyszínű", res.candidates.every((c) => c.location.trim().toUpperCase().endsWith("HU")));
+ok("discover(synthetic) → client passthrough megmaradt (insider jelölt szerepel)", res.candidates.some((c) => c.current_company === "Acme Kft"));
 
-const empty = await discover({ searchTiers: [], geoScope: null, source: "synthetic" });
-ok("discover(synthetic) üres tiers/geoScope esetén sem dob hibát", empty.candidates.length === 14);
+const empty = await discover({ searchQueries: [], broadSearchQueries: [], geoScope: null, source: "synthetic" });
+ok("discover(synthetic) üres bemenetek esetén is a teljes (17-es) poolra esik vissza", empty.candidates.length === 17);
 
 console.log("\nreachEngine tier-teszt kész.");
 ```
@@ -567,11 +614,11 @@ console.log("\nreachEngine tier-teszt kész.");
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `node scripts/test-reach-tiers.js`
-Expected: throws (`discover` still destructures `searchQueries`, not `searchTiers`, so `gatherSynthetic` is called with no `geoScope` and filtering doesn't happen — the "HU-only" assertion fails).
+Expected: throws or fails (current `discover` doesn't apply `geoScope` to the synthetic path the way this test expects — `gatherSynthetic` isn't geo-aware yet at the `reachEngine` call site before this task's edit; also `broadSearchQueries` is unused).
 
 - [ ] **Step 3: Implement the new `discover()`**
 
-Replace the entire `core/reach/reachEngine.js` file contents (currently lines 1-49) with:
+Replace the entire `core/reach/reachEngine.js` file contents with:
 
 ```js
 // Reach Engine — egységes discovery interfész. A felület nem tudja, mi van mögötte.
@@ -589,24 +636,21 @@ function pickSource(requested) {
   return reachLiveAvailable() ? "firecrawl" : "synthetic";
 }
 
-function tierQueries(searchTiers, tierName) {
-  const t = (searchTiers || []).find((x) => x && x.tier === tierName);
-  return (t && t.firecrawl_search_queries) || [];
-}
-
 /**
  * @param {object} p
- * @param {Array<{tier: string, firecrawl_search_queries: string[]}>} p.searchTiers - a queryBuild "search_tiers" kimenete
+ * @param {string[]} p.searchQueries - szűk körű firecrawl keresési lekérdezések (a queryBuild "firecrawl_search_queries" kimenete)
+ * @param {string[]} [p.broadSearchQueries] - tág körű lekérdezések, csak akkor futnak, ha a szűk kör kevés találatot hoz
  * @param {object} [p.geoScope] - a queryBuild "geo_scope" kimenete
  * @param {string} [p.source] - "auto" | "firecrawl" | "synthetic"
  * @param {function} [p.onProgress]
+ * @param {string} [p.client] - az ügyfél cége, a kizárási teszt-jelöltek (synthetic) beszúrásához
  * @returns {Promise<{source, candidates, note}>}
  */
-export async function discover({ searchTiers, geoScope, source, onProgress }) {
+export async function discover({ searchQueries, broadSearchQueries, geoScope, source, onProgress, client }) {
   const chosen = pickSource(source);
 
   if (chosen === "synthetic") {
-    const candidates = await gatherSynthetic(geoScope);
+    const candidates = await gatherSynthetic(client, geoScope);
     return {
       source: "synthetic",
       candidates,
@@ -616,16 +660,13 @@ export async function discover({ searchTiers, geoScope, source, onProgress }) {
     };
   }
 
-  const narrowQ = tierQueries(searchTiers, "narrow");
-  const broadQ = tierQueries(searchTiers, "broad");
-
   onProgress && onProgress("Firecrawl publikus-web discovery indul (szűk kör)…");
-  let hits = await searchHits(narrowQ, { onProgress });
+  let hits = await searchHits(searchQueries, { onProgress });
   let broadened = false;
-  if (hits.length < config.reachBroadenThreshold && broadQ.length) {
+  if (hits.length < config.reachBroadenThreshold && (broadSearchQueries || []).length) {
     broadened = true;
     onProgress && onProgress(`Kevés találat (${hits.length}) — kibővített kereséssel folytatjuk…`);
-    const more = await searchHits(broadQ, { onProgress });
+    const more = await searchHits(broadSearchQueries, { onProgress });
     const seen = new Set(hits.map((h) => h.url));
     for (const h of more) {
       if (seen.has(h.url)) continue;
@@ -654,36 +695,105 @@ export async function discover({ searchTiers, geoScope, source, onProgress }) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node scripts/test-reach-tiers.js`
-Expected: all 4 `✅` lines, exit code 0.
+Expected: all 5 `✅` lines, exit code 0.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add core/reach/reachEngine.js scripts/test-reach-tiers.js
-git commit -m "reach: discover() adaptively broadens narrow→broad tiers, scrapes once"
+git commit -m "reach: discover() adaptively broadens narrow→broad queries, preserves client passthrough"
 ```
 
 ---
 
-### Task 6: `capabilities.js` + `demo.js` — `queryBuild` new schema
+### Task 6: `capabilities.js` + `demo.js` — `queryBuild` gains `geo_scope` + broad tier
 
 **Files:**
-- Modify: `core/capabilities.js:57-71`
-- Modify: `core/demo.js:30-46`
+- Modify: `core/capabilities.js` (the `queryBuild` function)
+- Modify: `core/demo.js` (the `queryBuild` entry)
 - Test: `scripts/test-query-build-demo.js` (new)
 
 **Interfaces:**
 - Consumes: nothing new.
-- Produces: `queryBuild(...)` output shape `{ boolean_queries, geo_scope: { search_elasticity, anchor, catchment_places, rationale }, search_tiers: [{tier, firecrawl_search_queries}], target_companies, target_titles, synonyms }` — no more flat `firecrawl_search_queries`. Consumed by Task 8, Task 10, Task 11, Task 12.
+- Produces: `queryBuild(...)` output gains `firecrawl_search_queries_broad: string[]` and `geo_scope: { search_elasticity, anchor, catchment_places, rationale }`, **added alongside** all existing fields (`boolean_queries`, `firecrawl_search_queries`, `target_companies`, `target_titles`, `synonyms`, `exclude_companies`, `exclusion_note` — all unchanged). Consumed by Task 7, Task 9, Task 10, Task 11, Task 12.
 
-These two files must change together — `capabilities.js`'s live-mode schema and `demo.js`'s no-key fallback must describe the same shape, or demo mode (which most local runs use, per README) breaks. The test below runs in demo mode (no `ANTHROPIC_API_KEY`), which is deterministic and needs no live call.
+The current `queryBuild` in `core/capabilities.js` (verified — do not assume any other shape):
+
+```js
+// ── 🧠 KERESÉSI TERV ─────────────────────────────────────────
+export async function queryBuild({ intake, brief, position, briefFinal }, { projectId } = {}) {
+  const client = (position && position.client) || "";
+  const task = `FELADAT: Készíts keresési tervet. Boolean lekérdezéseket a szokásos platformokra, ÉS "firecrawl_search_queries" listát, ami a nyilvános webes felkutatást vezérli (Google-stílusú, site: operátorokkal, senior tech / CEE fókusz).
+${LANG}
+KIZÁRÁS — KÖTELEZŐ: az ügyfél saját cége SOHA nem lehet célcég, és a lekérdezésekbe negatív szűrőként be kell kerülnie (pl. -"Ügyfél Neve"). Az ügyfél jelenlegi és volt munkatársait a hiring manager amúgy is ismeri; ha bekerülnek a merítésbe, az a keresés hitelét viszi. Az "exclude_companies" listába vedd fel az ügyfél cégét és a felismerhető leányvállalatait.
+Kimeneti JSON séma:
+{
+ "boolean_queries": [ { "platform": "linkedin-xray|github|google", "query": "<lekérdezés, az ügyfél negatív szűrőjével>" } ],
+ "firecrawl_search_queries": ["<4-5 konkrét kereső-lekérdezés, site: operátorokkal>"],
+ "target_companies": ["<az ügyfél cége NEM szerepelhet itt>"],
+ "target_titles": ["..."],
+ "synonyms": ["..."],
+ "exclude_companies": ["<az ügyfél cége és leányvállalatai — off-limits>"],
+ "exclusion_note": "<egy mondat: kinek a munkatársai maradnak ki a merítésből és miért>"
+}`;
+  // A recruiter által VÉGLEGESÍTETT brief az elsődleges bemenet; az AI-javaslat
+  // csak akkor, ha a véglegesítés még nem történt meg.
+  const basis =
+    briefFinal && briefFinal.text
+      ? {
+          veglegesitett_brief: briefFinal.text,
+          must_haves: briefFinal.must_haves,
+          nice_to_haves: briefFinal.nice_to_haves,
+        }
+      : intake || { brief };
+  const input = `POZÍCIÓ-ÖSSZEFOGLALÓ (a keresés alapja):\n${J(basis)}${positionCtx(position)}${
+    client ? `\n\nAZ ÜGYFÉL CÉGE (kizárandó): ${client}` : ""
+  }`;
+  return run("queryBuild", { task, input, demoInput: { intake, client } }, projectId);
+}
+```
+
+The current `queryBuild` entry in `core/demo.js` (verified):
+
+```js
+  // Az ügyfél kizárása a TERV része, nem utólagos szűrés — a demó-kimenet is
+  // így néz ki, hogy a szabály ugyanaz legyen kulccsal és kulcs nélkül.
+  queryBuild: (input) => {
+    const client = (input && input.client) || "";
+    const neg = client ? ` -"${client}"` : "";
+    return {
+      _demo: true,
+      boolean_queries: [
+        { platform: "linkedin-xray", query: 'site:linkedin.com/in ("staff engineer" OR "principal engineer" OR "tech lead") payments (Go OR Rust OR Java) (Budapest OR Warsaw OR Prague OR remote)' + neg },
+        { platform: "github", query: "site:github.com payments idempotency location:Hungary OR location:Poland" + neg },
+        { platform: "google", query: '"craft conf" OR "pycon" speaker distributed systems payments 2024 2025' + neg },
+      ],
+      firecrawl_search_queries: [
+        "site:linkedin.com/in staff engineer payments Go Rust Budapest OR Warsaw" + neg,
+        "site:github.com senior backend engineer payments idempotency Hungary OR Poland" + neg,
+        "craft conf speaker distributed systems payments CEE",
+        "principal platform engineer Kubernetes SRE Krakow OR Prague site:linkedin.com/in" + neg,
+      ],
+      target_companies: ["(régiós fintechek)", "(neobankok)", "(payment PSP-k)", "(infra startupok)"],
+      target_titles: ["Staff Engineer", "Principal Engineer", "Tech Lead", "Engineering Manager (hands-on)"],
+      synonyms: ["distributed systems", "payments core", "high-throughput", "event-sourcing", "SRE"],
+      exclude_companies: client ? [client] : [],
+      exclusion_note: client
+        ? `Az ügyfél (${client}) jelenlegi és volt munkatársai nem kerülnek a merítésbe — őket a hiring manager amúgy is ismeri.`
+        : "Add meg az ügyfél nevét a pozícióadatoknál, hogy a saját munkatársai automatikusan kimaradjanak.",
+    };
+  },
+```
+
+These two must change together — `capabilities.js`'s live-mode schema and `demo.js`'s no-key fallback must describe the same shape, or demo mode (which most local runs use) breaks. The test below runs in demo mode (no `ANTHROPIC_API_KEY`), which is deterministic and needs no live call.
 
 - [ ] **Step 1: Write the failing test**
 
 Create `scripts/test-query-build-demo.js`:
 
 ```js
-// Egységteszt: queryBuild demo-módban (nincs API-kulcs) az új sémát adja vissza.
+// Egységteszt: queryBuild demo-módban (nincs API-kulcs) az új mezőket adja vissza,
+// és a meglévő kizárás-funkció (exclude_companies) nem sérül.
 import * as ric from "../core/index.js";
 
 function ok(name, cond) {
@@ -696,14 +806,16 @@ if (ric.brainAvailable()) {
   process.exit(0);
 }
 
-const q = await ric.queryBuild({ intake: { must_haves: ["payments"] }, brief: "teszt brief" });
+const q = await ric.queryBuild({ intake: { must_haves: ["payments"] }, brief: "teszt brief", position: { client: "Acme Kft" } });
 
+ok("queryBuild → firecrawl_search_queries megmaradt (a meglévő szerkeszthető mező nem sérült)", Array.isArray(q.firecrawl_search_queries) && q.firecrawl_search_queries.length > 0);
+ok("queryBuild → firecrawl_search_queries_broad új mező, nem üres tömb", Array.isArray(q.firecrawl_search_queries_broad) && q.firecrawl_search_queries_broad.length > 0);
 ok("queryBuild → geo_scope objektum jelen van", !!q.geo_scope && typeof q.geo_scope === "object");
 ok("queryBuild → geo_scope.search_elasticity érvényes érték", ["tight", "moderate", "loose"].includes(q.geo_scope.search_elasticity));
 ok("queryBuild → geo_scope.catchment_places tömb, nem üres", Array.isArray(q.geo_scope.catchment_places) && q.geo_scope.catchment_places.length > 0);
 ok("queryBuild → geo_scope.rationale szöveg", typeof q.geo_scope.rationale === "string" && q.geo_scope.rationale.length > 0);
-ok("queryBuild → search_tiers tömb, narrow + broad szinttel", Array.isArray(q.search_tiers) && q.search_tiers.some((t) => t.tier === "narrow") && q.search_tiers.some((t) => t.tier === "broad"));
-ok("queryBuild → régi lapos firecrawl_search_queries NINCS a gyökérben", q.firecrawl_search_queries === undefined);
+ok("queryBuild → a meglévő kizárás-funkció nem sérült (exclude_companies)", Array.isArray(q.exclude_companies) && q.exclude_companies.includes("Acme Kft"));
+ok("queryBuild → exclusion_note is megmaradt", typeof q.exclusion_note === "string" && q.exclusion_note.length > 0);
 
 console.log("\nqueryBuild demo-séma teszt kész.");
 ```
@@ -711,38 +823,23 @@ console.log("\nqueryBuild demo-séma teszt kész.");
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `node scripts/test-query-build-demo.js`
-Expected: fails on `geo_scope` assertions (current demo fallback has no `geo_scope`/`search_tiers`, still has flat `firecrawl_search_queries`).
+Expected: fails on the `firecrawl_search_queries_broad`/`geo_scope` assertions (current demo fallback has neither).
 
 - [ ] **Step 3: Update `core/capabilities.js`'s `queryBuild`**
 
-Replace the entire `queryBuild` function (current lines 57-71):
+Replace the entire `queryBuild` function (the exact current text quoted above) with:
 
 ```js
 // ── 🧠 KERESÉSI TERV ─────────────────────────────────────────
-export async function queryBuild({ intake, brief, position }, { projectId } = {}) {
-  const task = `FELADAT: Készíts keresési tervet. Boolean lekérdezéseket a szokásos platformokra, ÉS "firecrawl_search_queries" listát, ami a nyilvános webes felkutatást vezérli (Google-stílusú, site: operátorokkal, senior tech / CEE fókusz).
+export async function queryBuild({ intake, brief, position, briefFinal }, { projectId } = {}) {
+  const client = (position && position.client) || "";
+  const task = `FELADAT: Készíts keresési tervet HÁROM részben.
+
+(1) LEKÉRDEZÉSEK: "firecrawl_search_queries" — a SZŰK kör, ami a nyilvános webes felkutatást vezérli (Google-stílusú, site: operátorokkal, senior tech / CEE fókusz), az elengedhetetlen feltételek (must_haves) mindegyikét ÉSelve. ÉS "firecrawl_search_queries_broad" — a TÁG kör: csak a szerep magja (cím/terület), az elengedhetetlen feltételek szigorú kombinációja NÉLKÜL; ez akkor kerül ténylegesen lekérdezésre, ha a szűk kör kevés találatot hoz. Boolean lekérdezéseket is adj a szokásos platformokra.
 ${LANG}
-Kimeneti JSON séma:
-{
- "boolean_queries": [ { "platform": "linkedin-xray|github|google", "query": "..." } ],
- "firecrawl_search_queries": ["<4-5 konkrét kereső-lekérdezés, site: operátorokkal>"],
- "target_companies": ["..."],
- "target_titles": ["..."],
- "synonyms": ["..."]
-}`;
-  const input = `JAVASOLT POZÍCIÓ-ÖSSZEFOGLALÓ:\n${J(intake || { brief })}${positionCtx(position)}`;
-  return run("queryBuild", { task, input, demoInput: { intake } }, projectId);
-}
-```
+KIZÁRÁS — KÖTELEZŐ: az ügyfél saját cége SOHA nem lehet célcég, és MINDKÉT lekérdezés-listába (szűk és tág is) negatív szűrőként be kell kerülnie (pl. -"Ügyfél Neve"). Az ügyfél jelenlegi és volt munkatársait a hiring manager amúgy is ismeri; ha bekerülnek a merítésbe, az a keresés hitelét viszi. Az "exclude_companies" listába vedd fel az ügyfél cégét és a felismerhető leányvállalatait.
 
-with:
-
-```js
-// ── 🧠 KERESÉSI TERV ─────────────────────────────────────────
-export async function queryBuild({ intake, brief, position }, { projectId } = {}) {
-  const task = `FELADAT: Készíts keresési tervet KÉT részben.
-
-(1) FÖLDRAJZI HATÓKÖR ("geo_scope"): gondolkodj el a szerep valódi keresési földrajzán. Elsőként reálisan, megnevezett helyekben gondolkodj (akár országhatáron át is, ha egy külföldi hely road-távolságban közelebb van, mint egy belföldi) — csak olyan helyet vegyél fel, amire konkrét, evidencia-alapú indokod van (valós ingázási folyosó, ismert vonzáskörzeti település, dokumentált határon-átnyúló munkaerő-mozgás); ne told fel a listát spekulatív, "néha idesorolható" helyekkel. NE adj meg konkrét perc- vagy km-adatot — ehhez nincs megbízható adatod, csak relatív/összehasonlító ítéleted lehet ("X közelebb van az anchorhoz, mint Y"). Az anchor (a megbízás helyszíne, position.location) MINDIG szerepeljen a catchment_places listában, a rugalmasságtól függetlenül.
+(2) FÖLDRAJZI HATÓKÖR ("geo_scope"): gondolkodj el a szerep valódi keresési földrajzán. Elsőként reálisan, megnevezett helyekben gondolkodj (akár országhatáron át is, ha egy külföldi hely road-távolságban közelebb van, mint egy belföldi) — csak olyan helyet vegyél fel, amire konkrét, evidencia-alapú indokod van (valós ingázási folyosó, ismert vonzáskörzeti település, dokumentált határon-átnyúló munkaerő-mozgás); ne told fel a listát spekulatív, "néha idesorolható" helyekkel. NE adj meg konkrét perc- vagy km-adatot — ehhez nincs megbízható adatod, csak relatív/összehasonlító ítéleted lehet ("X közelebb van az anchorhoz, mint Y"). Az anchor (a megbízás helyszíne, position.location) MINDIG szerepeljen a catchment_places listában, a rugalmasságtól függetlenül.
 
 Másodjára állapítsd meg a "search_elasticity" értéket (tight|moderate|loose) — ez azt fejezi ki, mennyire kell a keresést földrajzilag megkötni, és a szerep valós piaci utánpótlási mintázatából következik, NEM a munkavégzés helyszínéből (helyszíni/hibrid/távoli) és NEM abból, hogy a helylista hosszú-e vagy határon átnyúlik-e:
 - "tight": belépő szintű, nagy volumenű, műszakos vagy más módon helyettesíthető/bőséges helyi munkaerő-kínálatú szerep, fizikai jelenléttel. Behatárolt helyi/céges-buszjárat vonzáskörzet.
@@ -751,108 +848,100 @@ Másodjára állapítsd meg a "search_elasticity" értéket (tight|moderate|loos
 
 Mielőtt lezárnád: ellenőrizd, hogy a "search_elasticity" összhangban van-e a földrajzi indoklásoddal — ha behatárolt helyi/buszjárat-vonzáskörzetet írtál le, az elasticity nem lehet "loose"; ha országos/ritka-szakértői tehetségpiacról írtál, ne írj le egyúttal szűk ingázó-települések gyűrűjét. Ha a kettő nem egyezik, javítsd az egyiket, mielőtt válaszolsz. "loose" rugalmasság esetén is adj meg valós, konkrét helyeket (pl. domináns szakmai-vezetői központokat, releváns nemzetközi csomópontokat a brief kontextusához kötve) — az üres lista nem elfogadható válasz.
 
-(2) KERESÉSI LEKÉRDEZÉSEK ("search_tiers"): két szint. "narrow": az elengedhetetlen feltételek (must_haves) mindegyikét ÉSeli, a geo_scope catchment_places-ét beleszőve. "broad": csak a szerep magja (cím/terület), az elengedhetetlen feltételek szigorú kombinációja NÉLKÜL, ugyanazzal a geo_scope-pal — ez akkor kerül ténylegesen lekérdezésre, ha a szűk kör kevés találatot hoz.
+(3) Célcégek, célpozíciók, kulcs-szinonimák — a szokásos módon.
 
-ÉS Boolean lekérdezéseket a szokásos platformokra (referenciaanyag, nem kerül automatikusan lekérdezésre).
-${LANG}
 Kimeneti JSON séma:
 {
- "boolean_queries": [ { "platform": "linkedin-xray|github|google", "query": "..." } ],
+ "boolean_queries": [ { "platform": "linkedin-xray|github|google", "query": "<lekérdezés, az ügyfél negatív szűrőjével>" } ],
+ "firecrawl_search_queries": ["<3-4 szűk lekérdezés, site: operátorokkal, az ügyfél negatív szűrőjével>"],
+ "firecrawl_search_queries_broad": ["<2-3 tág lekérdezés, site: operátorokkal, az ügyfél negatív szűrőjével>"],
+ "target_companies": ["<az ügyfél cége NEM szerepelhet itt>"],
+ "target_titles": ["..."],
+ "synonyms": ["..."],
+ "exclude_companies": ["<az ügyfél cége és leányvállalatai — off-limits>"],
+ "exclusion_note": "<egy mondat: kinek a munkatársai maradnak ki a merítésből és miért>",
  "geo_scope": {
    "search_elasticity": "tight|moderate|loose",
    "anchor": "<position.location visszaadva>",
    "catchment_places": [ { "place": "...", "country": "...", "cross_border": true, "note": "<konkrét, evidencia-alapú indok>" } ],
    "rationale": "<földrajzi indoklás + elasticity-indoklás együtt, önellentmondás-mentesen>"
- },
- "search_tiers": [
-   { "tier": "narrow", "firecrawl_search_queries": ["<3-4 szűk lekérdezés, site: operátorokkal>"] },
-   { "tier": "broad", "firecrawl_search_queries": ["<2-3 tág lekérdezés, site: operátorokkal>"] }
- ],
- "target_companies": ["..."],
- "target_titles": ["..."],
- "synonyms": ["..."]
+ }
 }`;
-  const input = `JAVASOLT POZÍCIÓ-ÖSSZEFOGLALÓ:\n${J(intake || { brief })}${positionCtx(position)}`;
-  return run("queryBuild", { task, input, demoInput: { intake } }, projectId);
+  // A recruiter által VÉGLEGESÍTETT brief az elsődleges bemenet; az AI-javaslat
+  // csak akkor, ha a véglegesítés még nem történt meg.
+  const basis =
+    briefFinal && briefFinal.text
+      ? {
+          veglegesitett_brief: briefFinal.text,
+          must_haves: briefFinal.must_haves,
+          nice_to_haves: briefFinal.nice_to_haves,
+        }
+      : intake || { brief };
+  const input = `POZÍCIÓ-ÖSSZEFOGLALÓ (a keresés alapja):\n${J(basis)}${positionCtx(position)}${
+    client ? `\n\nAZ ÜGYFÉL CÉGE (kizárandó): ${client}` : ""
+  }`;
+  return run("queryBuild", { task, input, demoInput: { intake, client } }, projectId);
 }
 ```
 
 - [ ] **Step 4: Update `core/demo.js`'s `queryBuild` fallback**
 
-Replace the entire `queryBuild` entry in the `demo` object (current lines 30-46):
+Replace the entire `queryBuild` entry (the exact current text quoted above) with:
 
 ```js
-  queryBuild: (input) => ({
-    _demo: true,
-    boolean_queries: [
-      { platform: "linkedin-xray", query: 'site:linkedin.com/in ("staff engineer" OR "principal engineer" OR "tech lead") payments (Go OR Rust OR Java) (Budapest OR Warsaw OR Prague OR remote)' },
-      { platform: "github", query: 'site:github.com payments idempotency location:Hungary OR location:Poland' },
-      { platform: "google", query: '"craft conf" OR "pycon" speaker distributed systems payments 2024 2025' },
-    ],
-    firecrawl_search_queries: [
-      'site:linkedin.com/in staff engineer payments Go Rust Budapest OR Warsaw',
-      'site:github.com senior backend engineer payments idempotency Hungary OR Poland',
-      'craft conf speaker distributed systems payments CEE',
-      'principal platform engineer Kubernetes SRE Krakow OR Prague site:linkedin.com/in',
-    ],
-    target_companies: ["(régiós fintechek)", "(neobankok)", "(payment PSP-k)", "(infra startupok)"],
-    target_titles: ["Staff Engineer", "Principal Engineer", "Tech Lead", "Engineering Manager (hands-on)"],
-    synonyms: ["distributed systems", "payments core", "high-throughput", "event-sourcing", "SRE"],
-  }),
-```
-
-with:
-
-```js
-  queryBuild: (input) => ({
-    _demo: true,
-    boolean_queries: [
-      { platform: "linkedin-xray", query: 'site:linkedin.com/in ("staff engineer" OR "principal engineer" OR "tech lead") payments (Go OR Rust OR Java) (Budapest OR Warsaw OR Prague OR remote)' },
-      { platform: "github", query: 'site:github.com payments idempotency location:Hungary OR location:Poland' },
-      { platform: "google", query: '"craft conf" OR "pycon" speaker distributed systems payments 2024 2025' },
-    ],
-    geo_scope: {
-      search_elasticity: "moderate",
-      anchor: "Budapest, HU",
-      catchment_places: [
-        { place: "Budapest", country: "Hungary", cross_border: false, note: "A megbízás helyszíne — a jelöltpiac magja." },
-        { place: "Győr", country: "Hungary", cross_border: false, note: "Regionális tech-hub, hibrid munkavégzéssel elérhető távolság." },
-        { place: "Bratislava", country: "Slovakia", cross_border: true, note: "Vasúti/autópálya-kapcsolat Budapesttel, valós CEE senior tech ingázási/hibrid folyosó." },
+  // Az ügyfél kizárása a TERV része, nem utólagos szűrés — a demó-kimenet is
+  // így néz ki, hogy a szabály ugyanaz legyen kulccsal és kulcs nélkül.
+  queryBuild: (input) => {
+    const client = (input && input.client) || "";
+    const neg = client ? ` -"${client}"` : "";
+    return {
+      _demo: true,
+      boolean_queries: [
+        { platform: "linkedin-xray", query: 'site:linkedin.com/in ("staff engineer" OR "principal engineer" OR "tech lead") payments (Go OR Rust OR Java) (Budapest OR Warsaw OR Prague OR remote)' + neg },
+        { platform: "github", query: "site:github.com payments idempotency location:Hungary OR location:Poland" + neg },
+        { platform: "google", query: '"craft conf" OR "pycon" speaker distributed systems payments 2024 2025' + neg },
       ],
-      rationale: "Hibrid, senior egyéni-szakértői/tech-lead jellegű szerep — szélesebb, akár határon-átnyúló ingázási területet enged meg, de nem országos költözés-alapú keresést, ezért 'moderate'.",
-    },
-    search_tiers: [
-      {
-        tier: "narrow",
-        firecrawl_search_queries: [
-          'site:linkedin.com/in staff engineer payments Go Rust Budapest OR Warsaw',
-          'site:github.com senior backend engineer payments idempotency Hungary OR Poland',
+      firecrawl_search_queries: [
+        "site:linkedin.com/in staff engineer payments Go Rust Budapest OR Warsaw" + neg,
+        "site:github.com senior backend engineer payments idempotency Hungary OR Poland" + neg,
+        "craft conf speaker distributed systems payments CEE",
+        "principal platform engineer Kubernetes SRE Krakow OR Prague site:linkedin.com/in" + neg,
+      ],
+      firecrawl_search_queries_broad: [
+        "staff engineer OR principal engineer payments Budapest OR CEE" + neg,
+        "platform engineer Kubernetes CEE site:linkedin.com/in" + neg,
+      ],
+      target_companies: ["(régiós fintechek)", "(neobankok)", "(payment PSP-k)", "(infra startupok)"],
+      target_titles: ["Staff Engineer", "Principal Engineer", "Tech Lead", "Engineering Manager (hands-on)"],
+      synonyms: ["distributed systems", "payments core", "high-throughput", "event-sourcing", "SRE"],
+      exclude_companies: client ? [client] : [],
+      exclusion_note: client
+        ? `Az ügyfél (${client}) jelenlegi és volt munkatársai nem kerülnek a merítésbe — őket a hiring manager amúgy is ismeri.`
+        : "Add meg az ügyfél nevét a pozícióadatoknál, hogy a saját munkatársai automatikusan kimaradjanak.",
+      geo_scope: {
+        search_elasticity: "moderate",
+        anchor: "Budapest, HU",
+        catchment_places: [
+          { place: "Budapest", country: "Hungary", cross_border: false, note: "A megbízás helyszíne — a jelöltpiac magja." },
+          { place: "Győr", country: "Hungary", cross_border: false, note: "Regionális tech-hub, hibrid munkavégzéssel elérhető távolság." },
+          { place: "Bratislava", country: "Slovakia", cross_border: true, note: "Vasúti/autópálya-kapcsolat Budapesttel, valós CEE senior tech ingázási/hibrid folyosó." },
         ],
+        rationale: "Hibrid, senior egyéni-szakértői/tech-lead jellegű szerep — szélesebb, akár határon-átnyúló ingázási területet enged meg, de nem országos költözés-alapú keresést, ezért 'moderate'.",
       },
-      {
-        tier: "broad",
-        firecrawl_search_queries: [
-          'craft conf speaker distributed systems payments CEE',
-          'principal platform engineer Kubernetes SRE Krakow OR Prague site:linkedin.com/in',
-        ],
-      },
-    ],
-    target_companies: ["(régiós fintechek)", "(neobankok)", "(payment PSP-k)", "(infra startupok)"],
-    target_titles: ["Staff Engineer", "Principal Engineer", "Tech Lead", "Engineering Manager (hands-on)"],
-    synonyms: ["distributed systems", "payments core", "high-throughput", "event-sourcing", "SRE"],
-  }),
+    };
+  },
 ```
 
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `node scripts/test-query-build-demo.js`
-Expected: all 6 `✅` lines, exit code 0. (If `ANTHROPIC_API_KEY` is set in your shell, temporarily unset it for this run: `env -u ANTHROPIC_API_KEY node scripts/test-query-build-demo.js`.)
+Expected: all 8 `✅` lines, exit code 0. (If `ANTHROPIC_API_KEY` is set in your shell, temporarily unset it for this run: `env -u ANTHROPIC_API_KEY node scripts/test-query-build-demo.js`.)
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add core/capabilities.js core/demo.js scripts/test-query-build-demo.js
-git commit -m "capabilities: queryBuild emits geo_scope + tiered search_tiers instead of flat query list"
+git commit -m "capabilities: queryBuild adds geo_scope + firecrawl_search_queries_broad, additively"
 ```
 
 ---
@@ -860,32 +949,32 @@ git commit -m "capabilities: queryBuild emits geo_scope + tiered search_tiers in
 ### Task 7: `capabilities.js` — `discoverCandidates` passthrough
 
 **Files:**
-- Modify: `core/capabilities.js:73-78`
+- Modify: `core/capabilities.js` (the `discoverCandidates` function)
 
 **Interfaces:**
-- Consumes: `discover({ searchTiers, geoScope, source, onProgress })` (Task 5).
-- Produces: `discoverCandidates({ searchTiers, geoScope, source, onProgress }, { projectId })` — signature changes from `discoverCandidates({ searchQueries, source, onProgress }, ...)`. Consumed by Task 9 (`app/server.js`), Task 10 (`mcp/server.js`).
+- Consumes: `discover({ searchQueries, broadSearchQueries, geoScope, source, onProgress, client })` (Task 5).
+- Produces: `discoverCandidates({ searchQueries, broadSearchQueries, geoScope, source, onProgress, client }, { projectId })`. Consumed by Task 9 (`app/server.js`), Task 10 (`mcp/server.js`).
 
-- [ ] **Step 1: Edit `core/capabilities.js`**
-
-Replace (current lines 73-78):
+The current function (verified):
 
 ```js
 // ── 📡 JELÖLTKUTATÁS (Reach Engine) ──────────────────────────
-export async function discoverCandidates({ searchQueries, source, onProgress }, { projectId } = {}) {
+export async function discoverCandidates({ searchQueries, source, onProgress, client }, { projectId } = {}) {
   audit({ capability: "discoverCandidates", projectId, input: { searchQueries, source }, mode: "reach" });
-  const res = await reachDiscover({ searchQueries, source, onProgress });
+  const res = await reachDiscover({ searchQueries, source, onProgress, client });
   return res; // { source, candidates, note }
 }
 ```
 
-with:
+- [ ] **Step 1: Edit `core/capabilities.js`**
+
+Replace it with:
 
 ```js
 // ── 📡 JELÖLTKUTATÁS (Reach Engine) ──────────────────────────
-export async function discoverCandidates({ searchTiers, geoScope, source, onProgress }, { projectId } = {}) {
-  audit({ capability: "discoverCandidates", projectId, input: { searchTiers, geoScope, source }, mode: "reach" });
-  const res = await reachDiscover({ searchTiers, geoScope, source, onProgress });
+export async function discoverCandidates({ searchQueries, broadSearchQueries, geoScope, source, onProgress, client }, { projectId } = {}) {
+  audit({ capability: "discoverCandidates", projectId, input: { searchQueries, broadSearchQueries, geoScope, source }, mode: "reach" });
+  const res = await reachDiscover({ searchQueries, broadSearchQueries, geoScope, source, onProgress, client });
   return res; // { source, candidates, note }
 }
 ```
@@ -896,18 +985,18 @@ Run:
 ```bash
 node -e "
 import('./core/index.js').then(async (ric) => {
-  const r = await ric.discoverCandidates({ searchTiers: [], geoScope: null, source: 'synthetic' });
+  const r = await ric.discoverCandidates({ searchQueries: [], broadSearchQueries: [], geoScope: null, source: 'synthetic' });
   console.log('candidates:', r.candidates.length, 'source:', r.source);
 });
 "
 ```
-Expected: `candidates: 14 source: synthetic` (no `geoScope` → fail-open per Task 2, full pool returned).
+Expected: `candidates: 17 source: synthetic` (no `geoScope` → fail-open per Task 2, full pool returned).
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add core/capabilities.js
-git commit -m "capabilities: discoverCandidates passes searchTiers/geoScope through to reachEngine"
+git commit -m "capabilities: discoverCandidates passes broadSearchQueries/geoScope through to reachEngine"
 ```
 
 ---
@@ -915,12 +1004,45 @@ git commit -m "capabilities: discoverCandidates passes searchTiers/geoScope thro
 ### Task 8: `capabilities.js` — `rankTargets` geo-aware input
 
 **Files:**
-- Modify: `core/capabilities.js:118-145`
+- Modify: `core/capabilities.js` (the `rankTargets` function)
 - Test: `scripts/test-rank-geo.js` (new)
 
 **Interfaces:**
 - Consumes: candidate records with `location`/`geo_fit` fields (Task 3 produces these on real candidates; synthetic candidates from Task 2 have `location` but no `geo_fit` — both must be handled without crashing).
 - Produces: no signature change (`rankTargets({ candidates, intake }, { projectId })` stays the same) — only the prompt input and instructions change. Guardrail `assertRankingComplete` behavior (imported from `core/guardrails.js`) is unchanged and must still hold.
+
+The current `rankTargets` (verified):
+
+```js
+// ── 🧠 PRIORITÁSI JAVASLAT (őszinte, akár elutasító) ─────────
+export async function rankTargets({ candidates, intake }, { projectId } = {}) {
+  const ids = (candidates || []).map((c) => c.id);
+  const task = `FELADAT: Készíts prioritási javaslatot: kivel érdemes először felvenni a kapcsolatot, és kivel nem. Őszinte prioritás: a gyenge/nem-illő jelölt is kap helyet, a "D — most nem javasolt" kategóriában, indoklással. A javaslat LEHET elutasító, ha az evidencia ezt támasztja alá. A prioritást a recruiter felülbírálhatja.
+ELSZÁMOLTATHATÓSÁG: a "ranked" tömb MINDEN bemeneti jelöltet tartalmazzon — senki nem eshet ki némán (de kaphat D-kategóriát).
+TÖMÖRSÉG (kötelező): gyors sor, NEM mély elemzés. A "rationale" EGYETLEN rövid tagmondat (max ~10 szó). SEMMI más mező — se név, se evidencia-lista.
+${LANG}
+Kimeneti JSON séma:
+{
+ "ranked": [ { "candidate_id": "...", "contact_priority": 1, "tier": "A — elsőként keresd meg|B — következő kör|C — figyelőlista|D — most nem javasolt", "rationale": "<max 10 szó>" } ],
+ "note": "Prioritási javaslat evidencia alapján — a recruiter felülbírálhatja."
+}`;
+  const input = `JELÖLTEK:\n${J((candidates || []).map((c) => ({ id: c.id, name: c.name, headline: c.headline, signals: c.signals })))}\n\nSZEREP:\n${J(intake || {})}`;
+  return run(
+    "rankTargets",
+    {
+      task,
+      input,
+      // Tömör kimenet → gyors generálás, hogy a serverless 60s limit alatt maradjon
+      // akkor is, ha sok (10+) jelöltet kell egy hívásban rangsorolni.
+      maxTokens: 4000,
+      demoInput: { candidates },
+      // A guard ellenőriz (hiányzó jelöltnél dob), de a teljes kimenetet adjuk vissza.
+      guard: (o) => { assertRankingComplete(ids, o.ranked || []); return o; },
+    },
+    projectId
+  );
+}
+```
 
 - [ ] **Step 1: Write the failing test**
 
@@ -960,20 +1082,20 @@ Expected: this should actually already pass structurally (demo fallback just map
 
 - [ ] **Step 3: Edit the `rankTargets` task prompt and input**
 
-In `core/capabilities.js`, find the `rankTargets` function (current lines 118-145). Replace this line:
+Find this line:
 
 ```js
 ELSZÁMOLTATHATÓSÁG: a "ranked" tömb MINDEN bemeneti jelöltet tartalmazzon — senki nem eshet ki némán (de kaphat D-kategóriát).
 ```
 
-with:
+Replace with:
 
 ```js
 ELSZÁMOLTATHATÓSÁG: a "ranked" tömb MINDEN bemeneti jelöltet tartalmazzon — senki nem eshet ki némán (de kaphat D-kategóriát).
 FÖLDRAJZ: ha egy jelölt "geo_fit" mezője "out_of_scope", és a szerep helyszínhez kötött (nem távoli munkavégzés), vedd figyelembe a rangsorolásnál, és jelezd tömören a rationale-ben.
 ```
 
-Then find this line (candidate mapping in the `input` construction):
+Then find this line:
 
 ```js
   const input = `JELÖLTEK:\n${J((candidates || []).map((c) => ({ id: c.id, name: c.name, headline: c.headline, signals: c.signals })))}\n\nSZEREP:\n${J(intake || {})}`;
@@ -1002,15 +1124,13 @@ git commit -m "capabilities: rankTargets receives location/geo_fit as explicit r
 ### Task 9: `app/server.js` — `/discover` route
 
 **Files:**
-- Modify: `app/server.js:122-134`
+- Modify: `app/server.js`
 
 **Interfaces:**
-- Consumes: `discoverCandidates({ searchTiers, geoScope, source, onProgress }, ...)` (Task 7).
+- Consumes: `discoverCandidates({ searchQueries, broadSearchQueries, geoScope, source, onProgress, client }, ...)` (Task 7).
 - Produces: no change to the HTTP contract (`POST /api/project/:id/discover` still returns `{ source, candidates, note }`) — only what it reads from `p.query` changes.
 
-- [ ] **Step 1: Edit `app/server.js`**
-
-Replace (current lines 122-134):
+The current route (verified):
 
 ```js
 // 3) Discover (Reach Engine)
@@ -1019,7 +1139,8 @@ app.post("/api/project/:id/discover", A(async (req, res) => {
   if (!p) return;
   const source = (req.body && req.body.source) || undefined;
   const sq = (p.query && p.query.firecrawl_search_queries) || [];
-  const result = await ric.discoverCandidates({ searchQueries: sq, source }, { projectId: p.id });
+  const client = (p.position && p.position.client) || "";
+  const result = await ric.discoverCandidates({ searchQueries: sq, source, client }, { projectId: p.id });
   p.candidates = result.candidates;
   p.discover_note = result.note;
   p.discover_source = result.source;
@@ -1028,7 +1149,9 @@ app.post("/api/project/:id/discover", A(async (req, res) => {
 }));
 ```
 
-with:
+- [ ] **Step 1: Edit `app/server.js`**
+
+Replace it with:
 
 ```js
 // 3) Discover (Reach Engine)
@@ -1036,9 +1159,11 @@ app.post("/api/project/:id/discover", A(async (req, res) => {
   const p = getProj(req, res);
   if (!p) return;
   const source = (req.body && req.body.source) || undefined;
-  const searchTiers = (p.query && p.query.search_tiers) || [];
+  const sq = (p.query && p.query.firecrawl_search_queries) || [];
+  const broadSq = (p.query && p.query.firecrawl_search_queries_broad) || [];
   const geoScope = (p.query && p.query.geo_scope) || null;
-  const result = await ric.discoverCandidates({ searchTiers, geoScope, source }, { projectId: p.id });
+  const client = (p.position && p.position.client) || "";
+  const result = await ric.discoverCandidates({ searchQueries: sq, broadSearchQueries: broadSq, geoScope, source, client }, { projectId: p.id });
   p.candidates = result.candidates;
   p.discover_note = result.note;
   p.discover_source = result.source;
@@ -1056,7 +1181,7 @@ Expected: JSON status response, no crash on boot (confirms no syntax error intro
 
 ```bash
 git add app/server.js
-git commit -m "app: /discover route reads query.search_tiers + query.geo_scope"
+git commit -m "app: /discover route reads query.firecrawl_search_queries_broad + query.geo_scope"
 ```
 
 ---
@@ -1064,15 +1189,13 @@ git commit -m "app: /discover route reads query.search_tiers + query.geo_scope"
 ### Task 10: `mcp/server.js` — tool schemas
 
 **Files:**
-- Modify: `mcp/server.js:19-30`
+- Modify: `mcp/server.js`
 
 **Interfaces:**
-- Consumes: `queryBuild({ intake, brief, position }, ...)` (Task 6, unchanged signature — only adding `position` passthrough here), `discoverCandidates({ searchTiers, geoScope, source }, ...)` (Task 7).
+- Consumes: `queryBuild({ intake, brief, position, briefFinal }, ...)` (Task 6, adding `position` passthrough here since MCP currently doesn't pass it), `discoverCandidates({ searchQueries, broadSearchQueries, geoScope, source }, ...)` (Task 7).
 - Produces: no change to the MCP tool *names*, only `inputSchema`/`description`/`run` for `query_build` and `discover_candidates`.
 
-- [ ] **Step 1: Edit `mcp/server.js`**
-
-Replace (current lines 19-30):
+This file was **not** touched by the upstream commits (confirmed via `git diff --stat`) — the current content (verified) is:
 
 ```js
   {
@@ -1089,20 +1212,22 @@ Replace (current lines 19-30):
   },
 ```
 
-with:
+- [ ] **Step 1: Edit `mcp/server.js`**
+
+Replace it with:
 
 ```js
   {
     name: "query_build",
-    description: "🧠 Keresési terv készítése: 'geo_scope' (földrajzi hatókör + rugalmasság) és 'search_tiers' (szűk/tág lekérdezés-szintek), amelyek a nyilvános webes jelöltkutatást vezérlik (senior tech / CEE).",
+    description: "🧠 Keresési terv készítése: 'firecrawl_search_queries' (szűk kör) + 'firecrawl_search_queries_broad' (tág, tartalék kör) + 'geo_scope' (földrajzi hatókör + rugalmasság), amelyek a nyilvános webes jelöltkutatást vezérlik (senior tech / CEE).",
     inputSchema: { type: "object", properties: { intake: OBJ, brief: STR, position: OBJ } },
     run: (a) => ric.queryBuild({ intake: a.intake, brief: a.brief, position: a.position }),
   },
   {
     name: "discover_candidates",
-    description: "📡 Jelöltkutatás nyilvánosan elérhető szakmai forrásokban (nincs belépett/fake-account LinkedIn-hozzáférés). Kulcs nélkül mintaadatokkal fut. Bemenet: a query_build 'search_tiers' és 'geo_scope' kimenete.",
-    inputSchema: { type: "object", properties: { search_tiers: { type: "array", items: OBJ }, geo_scope: OBJ, source: { type: "string", enum: ["auto", "firecrawl", "synthetic"] } }, required: ["search_tiers"] },
-    run: (a) => ric.discoverCandidates({ searchTiers: a.search_tiers, geoScope: a.geo_scope, source: a.source }),
+    description: "📡 Jelöltkutatás nyilvánosan elérhető szakmai forrásokban (nincs belépett/fake-account LinkedIn-hozzáférés). Kulcs nélkül mintaadatokkal fut. Bemenet: a query_build 'firecrawl_search_queries', 'firecrawl_search_queries_broad' és 'geo_scope' kimenete.",
+    inputSchema: { type: "object", properties: { search_queries: { type: "array", items: STR }, broad_search_queries: { type: "array", items: STR }, geo_scope: OBJ, source: { type: "string", enum: ["auto", "firecrawl", "synthetic"] } }, required: ["search_queries"] },
+    run: (a) => ric.discoverCandidates({ searchQueries: a.search_queries, broadSearchQueries: a.broad_search_queries, geoScope: a.geo_scope, source: a.source }),
   },
 ```
 
@@ -1111,27 +1236,30 @@ with:
 Run: `node -e "import('./mcp/server.js')" &` then `sleep 1 && kill %1`
 Expected: no syntax/import error before it's killed (the server blocks on stdio, so this just confirms it starts without crashing).
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Run the existing MCP smoke script as a regression check (no edit needed — its `discover_candidates` call uses only the still-valid, still-required `search_queries` param)**
+
+Run: `node scripts/test-mcp.js`
+Expected: all `✅` lines, `MCP smoke kész.` at the end, exit code 0.
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add mcp/server.js
-git commit -m "mcp: query_build/discover_candidates tool schemas match new search_tiers/geo_scope shape"
+git commit -m "mcp: query_build/discover_candidates tool schemas expose firecrawl_search_queries_broad + geo_scope"
 ```
 
 ---
 
-### Task 11: `scripts/smoke.js` — update to new shapes
+### Task 11: `scripts/smoke.js` — update to new fields
 
 **Files:**
-- Modify: `scripts/smoke.js:16-19`
+- Modify: `scripts/smoke.js`
 
 **Interfaces:**
-- Consumes: `queryBuild` (Task 6), `discoverCandidates` (Task 7) new shapes.
+- Consumes: `queryBuild` (Task 6), `discoverCandidates` (Task 7) new fields.
 - Produces: n/a (this is the test script itself).
 
-- [ ] **Step 1: Edit `scripts/smoke.js`**
-
-Replace (current lines 16-19):
+This file was **not** touched by the upstream commits (confirmed via `git diff --stat`) — the current relevant lines (verified against the original repo read) are:
 
 ```js
 const query = await ric.queryBuild({ intake });
@@ -1140,14 +1268,17 @@ ok("queryBuild → firecrawl_search_queries", Array.isArray(query.firecrawl_sear
 const disc = await ric.discoverCandidates({ searchQueries: query.firecrawl_search_queries, source: "synthetic" });
 ```
 
-with:
+- [ ] **Step 1: Edit `scripts/smoke.js`**
+
+Replace it with:
 
 ```js
 const query = await ric.queryBuild({ intake });
+ok("queryBuild → firecrawl_search_queries", Array.isArray(query.firecrawl_search_queries) && query.firecrawl_search_queries.length > 0);
+ok("queryBuild → firecrawl_search_queries_broad", Array.isArray(query.firecrawl_search_queries_broad));
 ok("queryBuild → geo_scope", !!query.geo_scope && ["tight", "moderate", "loose"].includes(query.geo_scope.search_elasticity));
-ok("queryBuild → search_tiers (narrow+broad)", Array.isArray(query.search_tiers) && query.search_tiers.length >= 2);
 
-const disc = await ric.discoverCandidates({ searchTiers: query.search_tiers, geoScope: query.geo_scope, source: "synthetic" });
+const disc = await ric.discoverCandidates({ searchQueries: query.firecrawl_search_queries, broadSearchQueries: query.firecrawl_search_queries_broad, geoScope: query.geo_scope, source: "synthetic" });
 ```
 
 - [ ] **Step 2: Run the full smoke suite**
@@ -1159,137 +1290,187 @@ Expected: all `✅` lines (demo mode if no `ANTHROPIC_API_KEY`, live mode otherw
 
 ```bash
 git add scripts/smoke.js
-git commit -m "scripts: smoke.js exercises the new geo_scope/search_tiers pipeline shape"
+git commit -m "scripts: smoke.js exercises the new geo_scope/broad-tier fields"
 ```
 
 ---
 
-### Task 12: `scripts/test-mcp.js` — update `discover_candidates` call
+### Task 12: `app/public/app.js` — `geo_scope` + broad-tier display in the Célpiac view
 
 **Files:**
-- Modify: `scripts/test-mcp.js:21`
+- Modify: `app/public/app.js` (the `renderQuery` function)
 
 **Interfaces:**
-- Consumes: MCP `discover_candidates` tool's new `inputSchema` (Task 10).
-- Produces: n/a (test script).
-
-- [ ] **Step 1: Edit `scripts/test-mcp.js`**
-
-Replace (current line 21):
-
-```js
-const disc = await client.callTool({ name: "discover_candidates", arguments: { search_queries: ["site:linkedin.com/in staff engineer payments"], source: "synthetic" } });
-```
-
-with:
-
-```js
-const disc = await client.callTool({ name: "discover_candidates", arguments: { search_tiers: [{ tier: "narrow", firecrawl_search_queries: ["site:linkedin.com/in staff engineer payments"] }], source: "synthetic" } });
-```
-
-- [ ] **Step 2: Run the MCP smoke test**
-
-Run: `node scripts/test-mcp.js`
-Expected: all `✅` lines, `MCP smoke kész.` at the end, exit code 0.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add scripts/test-mcp.js
-git commit -m "scripts: test-mcp.js discover_candidates call uses search_tiers"
-```
-
----
-
-### Task 13: `app/public/app.js` — `geo_scope` display in the Célpiac view
-
-**Files:**
-- Modify: `app/public/app.js:665-681` (`renderQuery`)
-
-**Interfaces:**
-- Consumes: `p.query.geo_scope` (Task 6's output shape, stored client-side after the existing `/query` API call — no new endpoint needed).
+- Consumes: `p.query.geo_scope`, `p.query.firecrawl_search_queries_broad` (Task 6's output, stored client-side after the existing `/query` API call — no new endpoint needed).
 - Produces: n/a (UI render function, no exported interface consumed elsewhere).
 
-- [ ] **Step 1: Edit `renderQuery`**
-
-Replace the entire `renderQuery` function (current lines 665-681):
+The current `renderQuery` function (verified — this is the live, current code, not the version from an earlier draft of this plan):
 
 ```js
+// A terv minden kategóriája szerkeszthető: hozzáadás és elvétel egyaránt.
 function renderQuery(p) {
   const o = p.query;
   const out = $("#queryOut");
   if (!o) { if (p.intake) out.innerHTML = ""; return; }
+  const edited = !!o._edited_by_recruiter;
   out.innerHTML = `
     <div class="card">
-      <h4>Keresési terv ${demoTag(o)}</h4>
-      ${(o.target_titles || []).length ? `<h4 style="margin-top:4px">Célpozíciók</h4>${chips(o.target_titles)}` : ""}
-      ${(o.target_companies || []).length ? `<h4 style="margin-top:8px">Célcégek</h4>${chips(o.target_companies)}` : ""}
-      ${(o.synonyms || []).length ? `<h4 style="margin-top:8px">Kulcs-szinonimák</h4>${chips(o.synonyms)}` : ""}
-      <details class="or-why" style="margin-top:10px"><summary>Keresési lekérdezések (részletek)</summary>
-        ${(o.boolean_queries || []).map((q) => `<div class="q-plat">${esc(q.platform)}</div><code class="q-code">${esc(q.query)}</code>`).join("")}
-        <h4 style="margin-top:8px">Webes kereső-lekérdezések</h4>
-        ${(o.firecrawl_search_queries || []).map((q) => `<code class="q-code">${esc(q)}</code>`).join("")}
+      <h4>Keresési terv ${demoTag(o)} ${edited ? `<span class="ai-status ok">Recruiter által szerkesztve</span>` : `<span class="ai-status">AI-javaslat — szerkeszthető</span>`}</h4>
+      <p class="kpi-desc" style="margin-top:0">A kategóriákhoz bármikor hozzáadhatsz vagy elvehetsz belőlük — a frissítés nem törli a kézi elemeidet.</p>
+      <div class="cov-label" style="margin-top:10px">Célpozíciók</div>${chipEditor("qTitles", o.target_titles, { placeholder: "Új célpozíció…" })}
+      <div class="cov-label" style="margin-top:12px">Célcégek</div>${chipEditor("qCompanies", o.target_companies, { placeholder: "Új célcég…" })}
+      <div class="cov-label" style="margin-top:12px">Kulcs-szinonimák</div>${chipEditor("qSyn", o.synonyms, { placeholder: "Új szinonima…" })}
+      <details class="or-why" id="qDetails"${detailsOpen("qDetails")} style="margin-top:12px"><summary>Keresési lekérdezések (szerkeszthető)</summary>
+        <div class="cov-label" style="margin-top:8px">Boolean / X-ray lekérdezések</div>
+        ${(o.boolean_queries || []).map((q, i) => `<div class="q-row"><div class="q-plat">${esc(q.platform || "egyéb")}</div><textarea class="q-code q-edit" data-qi="${i}" rows="2">${esc(q.query || "")}</textarea><button class="btn ed-x-btn" data-qrm="${i}" title="Lekérdezés törlése">×</button></div>`).join("")
+          || `<div class="ed-empty">— még nincs lekérdezés —</div>`}
+        <div class="ed-add q-add"><input class="ed-in" id="qBoolNew" placeholder="Új boolean lekérdezés…" /><button class="btn" id="qBoolAdd">+</button></div>
+        <div class="cov-label" style="margin-top:14px">Webes kereső-lekérdezések</div>
+        ${chipEditor("qWeb", o.firecrawl_search_queries, { placeholder: "Új webes lekérdezés…" })}
       </details>
     </div>`;
+  wireDetails("qDetails");
+  const touch = () => { o._edited_by_recruiter = true; };
+  // Minden kategória ugyanazt a szerződést kapja: hozzáadás + elvétel, és az
+  // elvétel emlékezetes (a frissítés nem hozza vissza).
+  const wireQ = (id, field) => wireChipEditor(id,
+    (v) => { touch(); o[field] = o[field] || []; addUnique(o[field], v); v.forEach((x) => unnoteRemoval(o, field, x)); afterChipEdit(renderCelpiac, p, id); },
+    (i) => { touch(); noteRemoval(o, field, (o[field] || [])[i]); o[field].splice(i, 1); afterChipEdit(renderCelpiac, p, id); });
+  wireQ("qTitles", "target_titles");
+  wireQ("qCompanies", "target_companies");
+  wireQ("qSyn", "synonyms");
+  wireQ("qWeb", "firecrawl_search_queries");
+  $$("#queryOut .q-edit").forEach((ta) => (ta.onchange = () => { touch(); o.boolean_queries[Number(ta.dataset.qi)].query = ta.value; persist(); }));
+  $$("#queryOut [data-qrm]").forEach((b) => (b.onclick = () => {
+    touch();
+    const i = Number(b.dataset.qrm);
+    noteRemoval(o, "boolean_queries", (o.boolean_queries[i] || {}).query);
+    o.boolean_queries.splice(i, 1);
+    persist();
+    renderCelpiac(p);
+  }));
+  const qAdd = $("#qBoolAdd");
+  if (qAdd) qAdd.onclick = () => {
+    const v = $("#qBoolNew").value.trim();
+    if (!v) return;
+    touch();
+    o.boolean_queries = o.boolean_queries || [];
+    o.boolean_queries.push({ platform: "egyéni", query: v });
+    persist();
+    renderCelpiac(p);
+  };
 }
 ```
 
-with:
+**Do not touch** `wireQ`, `touch`, the boolean-query editing block, or any `_edited_by_recruiter`/`noteRemoval`/`afterChipEdit` logic — the new fields are read-only and must not be wired into that machinery.
+
+- [ ] **Step 1: Add the read-only geo_scope + broad-tier display**
+
+Replace the `out.innerHTML = ...` assignment (the template literal shown above, from `` out.innerHTML = ` `` through the closing `` </div>`; ``) with:
 
 ```js
-function renderQuery(p) {
-  const o = p.query;
-  const out = $("#queryOut");
-  if (!o) { if (p.intake) out.innerHTML = ""; return; }
   const gs = o.geo_scope;
   const elasticityLabel = { tight: "szűk (helyi)", moderate: "közepes (régiós)", loose: "tág (országos/nemzetközi)" };
   out.innerHTML = `
     <div class="card">
-      <h4>Keresési terv ${demoTag(o)}</h4>
-      ${(o.target_titles || []).length ? `<h4 style="margin-top:4px">Célpozíciók</h4>${chips(o.target_titles)}` : ""}
-      ${(o.target_companies || []).length ? `<h4 style="margin-top:8px">Célcégek</h4>${chips(o.target_companies)}` : ""}
-      ${(o.synonyms || []).length ? `<h4 style="margin-top:8px">Kulcs-szinonimák</h4>${chips(o.synonyms)}` : ""}
+      <h4>Keresési terv ${demoTag(o)} ${edited ? `<span class="ai-status ok">Recruiter által szerkesztve</span>` : `<span class="ai-status">AI-javaslat — szerkeszthető</span>`}</h4>
+      <p class="kpi-desc" style="margin-top:0">A kategóriákhoz bármikor hozzáadhatsz vagy elvehetsz belőlük — a frissítés nem törli a kézi elemeidet.</p>
+      <div class="cov-label" style="margin-top:10px">Célpozíciók</div>${chipEditor("qTitles", o.target_titles, { placeholder: "Új célpozíció…" })}
+      <div class="cov-label" style="margin-top:12px">Célcégek</div>${chipEditor("qCompanies", o.target_companies, { placeholder: "Új célcég…" })}
+      <div class="cov-label" style="margin-top:12px">Kulcs-szinonimák</div>${chipEditor("qSyn", o.synonyms, { placeholder: "Új szinonima…" })}
       ${gs ? `
-        <h4 style="margin-top:8px">Földrajzi hatókör <span class="chip">${esc(elasticityLabel[gs.search_elasticity] || gs.search_elasticity)}</span></h4>
-        ${chips((gs.catchment_places || []).map((c) => c.cross_border ? `${c.place} (${c.country})` : c.place))}
-        ${gs.rationale ? `<p class="kpi-desc" style="margin-top:4px">${esc(gs.rationale)}</p>` : ""}
+      <div class="cov-label" style="margin-top:12px">Földrajzi hatókör <span class="chip">${esc(elasticityLabel[gs.search_elasticity] || gs.search_elasticity)}</span></div>
+      ${chips((gs.catchment_places || []).map((c) => c.cross_border ? `${c.place} (${c.country})` : c.place))}
+      ${gs.rationale ? `<p class="kpi-desc" style="margin-top:4px">${esc(gs.rationale)}</p>` : ""}
       ` : ""}
-      <details class="or-why" style="margin-top:10px"><summary>Keresési lekérdezések (részletek)</summary>
-        ${(o.boolean_queries || []).map((q) => `<div class="q-plat">${esc(q.platform)}</div><code class="q-code">${esc(q.query)}</code>`).join("")}
-        ${(o.search_tiers || []).map((t) => `
-          <h4 style="margin-top:8px">Webes kereső-lekérdezések — ${esc(t.tier === "narrow" ? "szűk kör" : "tág kör (csak ha a szűk kör kevés találatot hoz)")}</h4>
-          ${(t.firecrawl_search_queries || []).map((q) => `<code class="q-code">${esc(q)}</code>`).join("")}
-        `).join("")}
+      <details class="or-why" id="qDetails"${detailsOpen("qDetails")} style="margin-top:12px"><summary>Keresési lekérdezések (szerkeszthető)</summary>
+        <div class="cov-label" style="margin-top:8px">Boolean / X-ray lekérdezések</div>
+        ${(o.boolean_queries || []).map((q, i) => `<div class="q-row"><div class="q-plat">${esc(q.platform || "egyéb")}</div><textarea class="q-code q-edit" data-qi="${i}" rows="2">${esc(q.query || "")}</textarea><button class="btn ed-x-btn" data-qrm="${i}" title="Lekérdezés törlése">×</button></div>`).join("")
+          || `<div class="ed-empty">— még nincs lekérdezés —</div>`}
+        <div class="ed-add q-add"><input class="ed-in" id="qBoolNew" placeholder="Új boolean lekérdezés…" /><button class="btn" id="qBoolAdd">+</button></div>
+        <div class="cov-label" style="margin-top:14px">Webes kereső-lekérdezések</div>
+        ${chipEditor("qWeb", o.firecrawl_search_queries, { placeholder: "Új webes lekérdezés…" })}
+        ${(o.firecrawl_search_queries_broad || []).length ? `
+        <div class="cov-label" style="margin-top:14px">Tág kör (automatikus tartalék, ha a szűk kör kevés találatot hoz)</div>
+        ${(o.firecrawl_search_queries_broad || []).map((q) => `<code class="q-code">${esc(q)}</code>`).join("")}
+        ` : ""}
       </details>
     </div>`;
-}
 ```
+
+The rest of the function (`wireDetails("qDetails");` onward, `touch`, `wireQ`, the boolean-query handlers) is unchanged — leave it exactly as-is below this block.
 
 - [ ] **Step 2: Manual verification**
 
-Run: `npm run app`, open `http://localhost:5178`, create a project, run "Brief elemzése" then "Célpiac" → the "Keresési terv" card should show a "Földrajzi hatókör" section with an elasticity chip, place chips, and a rationale paragraph (demo mode is deterministic, so this reflects Task 6's demo fallback content).
+Run: `npm run app`, open `http://localhost:5178`, create a project, run "Brief elemzése" then "Keresési terv készítése" in the Célpiac view → the "Keresési terv" card should show a "Földrajzi hatókör" section with an elasticity chip, place chips, and a rationale paragraph, and the expanded "Keresési lekérdezések" details should show a "Tág kör" section below the editable web-query chips (demo mode is deterministic, so this reflects Task 6's demo fallback content). Confirm the existing editable chips (célpozíciók, célcégek, szinonimák, webes lekérdezések) still work exactly as before (add/remove, persists across `renderCelpiac` re-render).
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add app/public/app.js
-git commit -m "ui: Célpiac view shows geo_scope (elasticity + catchment + rationale)"
+git commit -m "ui: Célpiac view shows geo_scope (elasticity + catchment + rationale) and the broad-tier fallback queries, read-only"
 ```
 
 ---
 
-### Task 14: `app/public/app.js` — `geo_fit` badge on candidates
+### Task 13: `app/public/app.js` — `geo_fit` badge on candidates
 
 **Files:**
-- Modify: `app/public/app.js:758-769` (`renderCandidatesView` row) and `:808-830` (`renderDrawer`)
+- Modify: `app/public/app.js` (`candCardHtml`, `candRowHtml`, `renderDrawer`)
 
 **Interfaces:**
 - Consumes: `candidate.geo_fit` (Task 3's output field, present on live-mode candidates; `null`/`undefined` on synthetic candidates — must render nothing rather than a broken badge in that case).
 - Produces: n/a.
 
+The current relevant functions (verified — this is the live, current code):
+
+```js
+function candCardHtml(p, x) {
+  const t = effTier(p, x.id);
+  const ov = p.priority_overrides[x.id];
+  return `<div class="bcard tier-${t || "none"}" data-id="${esc(x.id)}" tabindex="0" role="button" aria-label="${esc(x.name)} megnyitása">
+    <div class="bcard-top">
+      <select class="prio-sel bcard-prio" data-id="${esc(x.id)}" title="Prioritás — a recruiter felülbírálhatja" aria-label="Prioritás">
+        <option value="" ${!t ? "selected" : ""}>—</option>
+        ${["A", "B", "C", "D"].map((k) => `<option value="${k}" ${t === k ? "selected" : ""}>${k}</option>`).join("")}
+      </select>
+      ${x.is_new ? `<span class="new-chip">Új</span>` : ""}
+      ${ov ? `<span class="bcard-ov" title="A recruiter állította be">kézzel</span>` : ""}
+    </div>
+    <div class="bcard-name">${esc(x.name)}</div>
+    <div class="bcard-meta">${esc(x.headline || "")}</div>
+    <div class="bcard-meta dim">${esc([x.current_company, x.location].filter(Boolean).join(" · "))}</div>
+    <div class="bcard-chips">${candStateChips(p, x)}<span class="chip">${strongCount(x)} erős jel</span></div>
+    <div class="bcard-next">${esc(candNext(p, x))}</div>
+  </div>`;
+}
+function candRowHtml(p, x) {
+  const t = effTier(p, x.id);
+  const ov = p.priority_overrides[x.id];
+  return `<div class="crow tier-${t || "none"}" data-id="${esc(x.id)}">
+    <select class="prio-sel" data-id="${esc(x.id)}" title="Prioritás — a recruiter felülbírálhatja">
+      <option value="" ${!t ? "selected" : ""}>—</option>
+      ${["A", "B", "C", "D"].map((k) => `<option value="${k}" ${t === k ? "selected" : ""}>${k}</option>`).join("")}
+    </select>
+    <div><div class="crow-name">${esc(x.name)}</div><div class="crow-head">${esc(x.headline || "")}</div></div>
+    <div class="crow-meta">${esc(x.current_company || "")}${x.location ? "<br>" + esc(x.location) : ""}</div>
+    <div class="crow-meta">${srcLabel(x.source_type)}<br><span class="mut">${strongCount(x)} erős jel</span>${ov ? `<br><span class="mut" style="font-size:10px">kézzel állítva</span>` : ""}</div>
+    <div class="crow-state">${candStateChips(p, x)}<div class="mut" style="margin-top:3px">Következő: ${candNext(p, x)}</div></div>
+    <button class="btn crow-open" data-id="${esc(x.id)}">Részletek</button>
+  </div>`;
+}
+```
+
+And in `renderDrawer`:
+
+```js
+      <div class="crow-meta" style="margin-top:4px">${[c.current_company, c.location].filter(Boolean).map(esc).join(" · ")}</div>
+      ${(c.past_companies || []).length ? `<div class="crow-meta" style="margin-top:2px">Korábban: ${(c.past_companies || []).map(esc).join(" · ")}</div>` : ""}
+```
+
 - [ ] **Step 1: Add a shared badge helper**
 
-In `app/public/app.js`, insert this function immediately above `function renderCandidatesView(p) {` (current line 715):
+In `app/public/app.js`, insert this function immediately above `function candCardHtml(p, x) {`:
 
 ```js
 function geoFitChip(geoFit) {
@@ -1300,50 +1481,67 @@ function geoFitChip(geoFit) {
 }
 ```
 
-- [ ] **Step 2: Use it in the candidate row**
+- [ ] **Step 2: Use it in the board card**
 
-In `renderCandidatesView`, find (current lines 764-765):
+Find (inside `candCardHtml`):
 
 ```js
-        <div class="crow-meta">${esc(x.current_company || "")}${x.location ? "<br>" + esc(x.location) : ""}</div>
-        <div class="crow-meta">${srcLabel(x.source_type)}<br><span class="mut">${strongCount(x)} erős jel</span>${ov ? `<br><span class="mut" style="font-size:10px">kézzel állítva</span>` : ""}</div>
+    <div class="bcard-meta dim">${esc([x.current_company, x.location].filter(Boolean).join(" · "))}</div>
 ```
 
 Replace with:
 
 ```js
-        <div class="crow-meta">${esc(x.current_company || "")}${x.location ? "<br>" + esc(x.location) : ""}${geoFitChip(x.geo_fit) ? "<br>" + geoFitChip(x.geo_fit) : ""}</div>
-        <div class="crow-meta">${srcLabel(x.source_type)}<br><span class="mut">${strongCount(x)} erős jel</span>${ov ? `<br><span class="mut" style="font-size:10px">kézzel állítva</span>` : ""}</div>
+    <div class="bcard-meta dim">${esc([x.current_company, x.location].filter(Boolean).join(" · "))}</div>
+    ${geoFitChip(x.geo_fit)}
 ```
 
-- [ ] **Step 3: Use it in the candidate drawer**
+- [ ] **Step 3: Use it in the list row**
 
-In `renderDrawer`, find (current line 820):
+Find (inside `candRowHtml`):
+
+```js
+    <div class="crow-meta">${esc(x.current_company || "")}${x.location ? "<br>" + esc(x.location) : ""}</div>
+    <div class="crow-meta">${srcLabel(x.source_type)}<br><span class="mut">${strongCount(x)} erős jel</span>${ov ? `<br><span class="mut" style="font-size:10px">kézzel állítva</span>` : ""}</div>
+```
+
+Replace with:
+
+```js
+    <div class="crow-meta">${esc(x.current_company || "")}${x.location ? "<br>" + esc(x.location) : ""}${geoFitChip(x.geo_fit) ? "<br>" + geoFitChip(x.geo_fit) : ""}</div>
+    <div class="crow-meta">${srcLabel(x.source_type)}<br><span class="mut">${strongCount(x)} erős jel</span>${ov ? `<br><span class="mut" style="font-size:10px">kézzel állítva</span>` : ""}</div>
+```
+
+- [ ] **Step 4: Use it in the candidate drawer**
+
+In `renderDrawer`, find:
 
 ```js
       <div class="crow-meta" style="margin-top:4px">${[c.current_company, c.location].filter(Boolean).map(esc).join(" · ")}</div>
+      ${(c.past_companies || []).length ? `<div class="crow-meta" style="margin-top:2px">Korábban: ${(c.past_companies || []).map(esc).join(" · ")}</div>` : ""}
 ```
 
 Replace with:
 
 ```js
       <div class="crow-meta" style="margin-top:4px">${[c.current_company, c.location].filter(Boolean).map(esc).join(" · ")} ${geoFitChip(c.geo_fit)}</div>
+      ${(c.past_companies || []).length ? `<div class="crow-meta" style="margin-top:2px">Korábban: ${(c.past_companies || []).map(esc).join(" · ")}</div>` : ""}
 ```
 
-- [ ] **Step 4: Manual verification**
+- [ ] **Step 5: Manual verification**
 
-Run: `npm run app`, open a project with discovered candidates (synthetic candidates won't show a badge since `geo_fit` is `null` for them — expected, per Task 2/3 scope; only live-mode Firecrawl candidates get `geo_fit`). Confirm no rendering errors (check browser console) and that the `.chip.good/.bad/.warn` classes render with the existing color scheme (reuses CSS already defined at `app/public/styles.css:162-166` — no new CSS needed).
+Run: `npm run app`, open a project with discovered candidates (synthetic candidates won't show a badge since `geo_fit` is `null` for them — expected, per Task 2/3 scope; only live-mode Firecrawl candidates get `geo_fit`). Confirm no rendering errors (check browser console) in both board and list view, and in the candidate drawer.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add app/public/app.js
-git commit -m "ui: candidate row and drawer show geo_fit badge"
+git commit -m "ui: candidate board card, list row, and drawer show geo_fit badge"
 ```
 
 ---
 
-### Task 15: Full regression pass
+### Task 14: Full regression pass
 
 **Files:** none (verification only)
 
@@ -1364,22 +1562,489 @@ Expected: every script prints only `✅` lines and exits 0.
 
 ---
 
-### Task 16: Manual live-mode verification (matches the spec's two regression scenarios)
+### Task 15: Manual live-mode verification (matches the spec's regression scenarios)
 
 **Files:** none — this exercises live `ANTHROPIC_API_KEY` (and optionally `FIRECRAWL_API_KEY`) behavior that can't be asserted deterministically.
 
 - [ ] **Step 1: Location sensitivity check**
 
-With `ANTHROPIC_API_KEY` set, run the app (`npm run app`), create two projects with the *same* brief (a common, replaceable role — e.g. adapt `test-briefs/01-platform-engineer-budapest-startup.md`'s brief text but keep it entry/mid-level) but different `position.location` (e.g. Győr vs Budapest). Run "Brief elemzése" → "Célpiac" on both. Confirm: `geo_scope.catchment_places` differs meaningfully between the two (not just the anchor city swapped in a template), and — in `synthetic` reach mode — the discovered candidate subset differs too. This is the direct regression test for "just looks for Hungarian candidates" no longer being true.
+With `ANTHROPIC_API_KEY` set, run the app (`npm run app`), create two projects with the *same* brief (a common, replaceable role — entry/mid-level) but different `position.location` (e.g. Győr vs Budapest). Run "Brief elemzése" → "Keresési terv készítése" on both. Confirm: `geo_scope.catchment_places` differs meaningfully between the two (not just the anchor city swapped in a template), and — in `synthetic` reach mode — the discovered candidate subset differs too. This is the direct regression test for "just looks for Hungarian candidates" no longer being true.
 
 - [ ] **Step 2: Elasticity sensitivity check**
 
-Using the same location, create two projects with `position.seniority` set to an entry-level value vs a C-level/executive value (brief text can otherwise stay similar, or use the clerk vs GM brief content drafted during design — see session history / `eval/` for reference style). Run "Brief elemzése" → "Célpiac" on both. Confirm: `geo_scope.search_elasticity` is `tight` (or close to it) for the entry-level case and `loose` for the executive case, with `catchment_places` visibly narrower vs. wider accordingly. This is the direct regression test for the clerk-vs-GM distinction that motivated this whole feature.
+Using the same location, create two projects with `position.seniority` set to an entry-level value vs a C-level/executive value (brief text can otherwise stay similar). Run "Brief elemzése" → "Keresési terv készítése" on both. Confirm: `geo_scope.search_elasticity` is `tight` (or close to it) for the entry-level case and `loose` for the executive case, with `catchment_places` visibly narrower vs. wider accordingly. This is the direct regression test for the clerk-vs-GM distinction that motivated this whole feature.
 
-- [ ] **Step 3: If either check fails**
+- [ ] **Step 3: Exclusion-feature regression check**
 
-Do not patch by hand-tuning the demo fallback (Task 6) — that only affects no-key mode. If live-mode reasoning drifts, the fix belongs in the `queryBuild` task prompt (Task 6, `core/capabilities.js`); re-read the calibration rules in `docs/superpowers/specs/2026-08-02-search-specification-and-geography-design.md` before changing them, since they were empirically validated, not guessed.
+Create a project with `position.client` set to a real-sounding company name. Run through Brief elemzése → Keresési terv. Confirm `exclude_companies` includes the client and `exclusion_note` reads correctly (unaffected by this plan's changes). Run "Jelöltkutatás" with `source: synthetic` and confirm the injected insider candidates are still present and still get excluded/flagged by the existing `Kizárás` UI exactly as before this plan's changes.
 
-- [ ] **Step 4: Update the README if the geography behavior is worth documenting for users**
+- [ ] **Step 4: If any check fails**
+
+Do not patch by hand-tuning the demo fallback (Task 6) — that only affects no-key mode. If live-mode reasoning drifts, the fix belongs in the `queryBuild` task prompt (Task 6, `core/capabilities.js`); re-read the calibration rules in `docs/superpowers/specs/2026-08-02-search-specification-and-geography-design.md` before changing them, since they were empirically validated, not guessed. If the exclusion-feature check fails, that's a regression this plan caused — fix it in whichever task's diff touched the affected file, don't work around it.
+
+- [ ] **Step 5: Update the README if the geography behavior is worth documenting for users**
 
 Optional — only if you judge it worth surfacing in `README.md`'s existing "📡 A scraping — mit csinál és mit NEM" section. Not required for this plan to be considered done.
+
+---
+
+### Task 16: Live-verification fixes — geo_fit enum validation, extraction retry, conditional exclusion filter
+
+**Why this task exists:** Task 15's live-mode run (real Firecrawl + real Anthropic calls) surfaced three concrete defects that no synthetic/demo test could catch, since they only manifest with real LLM output variance and real noisy web content:
+
+1. On a clean, small batch, live extraction correctly classified `geo_fit` — but the model returned the string `"unclear"` for one candidate, which is not one of the four values `normalize.js`'s own prompt schema defines (`in_scope|adjacent|out_of_scope|unknown`). `core/reach/normalize.js`'s current return mapping (`geo_fit: e.geo_fit || null`) does not validate this, so an arbitrary out-of-schema string can reach the UI's `geoFitChip()` (Task 13), which was only designed to handle the four documented values plus null/undefined.
+2. A larger, noisier live batch (17 raw hits including large non-candidate GitHub content) came back with `location`/`geo_fit` null and generic heuristic-fallback signals for **every single candidate** — the exact signature of the extraction `think()` call throwing (JSON parse failure or similar) and silently falling back to heuristics for the whole batch, with zero retry and zero logging. This is a pre-existing gap already named in this project's own `eval/REPORT.md` fix backlog ("`think()`: 1× retry JSON-parse-hibára") — not something earlier tasks in this plan introduced, but this plan's new `geo_fit` feature is now the most visible casualty of it in live use.
+3. `queryBuild`'s KIZÁRÁS instruction (`core/capabilities.js`) has no explicit fallback for "no client provided" — when `position.client` is empty, the live model invented a literal placeholder string `-"[ÜGYFÉL_CÉGNÉV_MEGADANDÓ]"` and appended it to every single search query (both tiers), observed directly in a live run. Harmless in effect (no real page matches that literal string, so the negative filter is a no-op) but visibly wrong, and now more visible than before since Task 12 surfaces raw queries to the recruiter in the UI.
+
+**Files:**
+- Modify: `core/reach/normalize.js` (fixes 1 and 2)
+- Modify: `core/capabilities.js` (fix 3, the `queryBuild` task prompt only)
+
+**Interfaces:** No signature changes anywhere — these are internal robustness/correctness fixes to functions already wired up by Tasks 3 and 6. Nothing downstream needs to change.
+
+The current `core/reach/normalize.js` (verified, current state after Task 3):
+
+```js
+export async function normalizeHits(hits, geoScope) {
+  const withRef = hits.map((h, i) => ({ ...h, ref: `h${i}` }));
+
+  let extracted = {};
+  if (brainAvailable() && withRef.length) {
+    try {
+      const geoBlock = geoScope ? `FÖLDRAJZI HATÓKÖR (geo_scope):\n${JSON.stringify(geoScope)}\n\n` : "";
+      const input =
+        geoBlock +
+        "TALÁLATOK:\n" +
+        withRef
+          .map(
+            (h) =>
+              `[${h.ref}] forrás=${h.source_type} url=${h.url}\ncím: ${h.title}\nleírás: ${h.description}\nkivonat: ${(h.excerpt || "").slice(0, 800)}`
+          )
+          .join("\n\n");
+      const out = await think({ task: EXTRACT_TASK, input, maxTokens: 6000, temperature: 0.2 });
+      for (const c of out.candidates || []) extracted[c.ref] = c;
+    } catch {
+      // ha az extrakció elhal, jön a heurisztika
+    }
+  }
+
+  return withRef.map((h) => {
+    const e = extracted[h.ref] || {};
+    const name = e.name || heuristicName(h.title);
+    const signals = (e.signals || []).map((s) => ({
+      signal: stripSensitive(s.signal),
+      strength: s.strength || "közepes",
+    }));
+    return {
+      id: idFor(h.url, h.title),
+      synthetic: false,
+      name,
+      headline: stripSensitive(e.headline || h.description || h.title || ""),
+      current_company: e.current_company || null,
+      // A kizárási szabály ("korábban az ügyfélnél dolgozott") ezen a mezőn áll
+      // vagy bukik — ha üres, csak a jelenlegi munkáltatóra tudunk szűrni.
+      past_companies: Array.isArray(e.past_companies) ? e.past_companies.filter(Boolean) : [],
+      location: e.location || null,
+      geo_fit: e.geo_fit || null,
+      is_person: e.is_person !== false,
+      signals: signals.length ? signals : [{ signal: stripSensitive(h.description || ""), strength: "gyenge" }],
+      source_url: h.url,
+      source_type: h.source_type,
+      art14_status: h.source_type === "linkedin" || h.source_type === "synthetic" ? "n/a" : "pending_notice",
+      provenance: {
+        method: "firecrawl-public-web",
+        query: h.query,
+        fetched_at: new Date().toISOString(),
+      },
+    };
+  });
+}
+```
+
+- [ ] **Step 1: Fix 1 + Fix 2 in `core/reach/normalize.js` — validate geo_fit enum, retry extraction once with logging**
+
+Replace the entire `normalizeHits` function above with:
+
+```js
+const VALID_GEO_FIT = ["in_scope", "adjacent", "out_of_scope", "unknown"];
+
+export async function normalizeHits(hits, geoScope) {
+  const withRef = hits.map((h, i) => ({ ...h, ref: `h${i}` }));
+
+  let extracted = {};
+  if (brainAvailable() && withRef.length) {
+    const geoBlock = geoScope ? `FÖLDRAJZI HATÓKÖR (geo_scope):\n${JSON.stringify(geoScope)}\n\n` : "";
+    const input =
+      geoBlock +
+      "TALÁLATOK:\n" +
+      withRef
+        .map(
+          (h) =>
+            `[${h.ref}] forrás=${h.source_type} url=${h.url}\ncím: ${h.title}\nleírás: ${h.description}\nkivonat: ${(h.excerpt || "").slice(0, 800)}`
+        )
+        .join("\n\n");
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const out = await think({ task: EXTRACT_TASK, input, maxTokens: 6000, temperature: 0.2 });
+        for (const c of out.candidates || []) extracted[c.ref] = c;
+        break;
+      } catch (e) {
+        if (attempt === 2) {
+          console.error(`normalizeHits: AI-extrakció 2 kísérlet után is elhalt, heurisztikára esik vissza (${withRef.length} találat): ${e.message}`);
+        }
+      }
+    }
+  }
+
+  return withRef.map((h) => {
+    const e = extracted[h.ref] || {};
+    const name = e.name || heuristicName(h.title);
+    const signals = (e.signals || []).map((s) => ({
+      signal: stripSensitive(s.signal),
+      strength: s.strength || "közepes",
+    }));
+    return {
+      id: idFor(h.url, h.title),
+      synthetic: false,
+      name,
+      headline: stripSensitive(e.headline || h.description || h.title || ""),
+      current_company: e.current_company || null,
+      // A kizárási szabály ("korábban az ügyfélnél dolgozott") ezen a mezőn áll
+      // vagy bukik — ha üres, csak a jelenlegi munkáltatóra tudunk szűrni.
+      past_companies: Array.isArray(e.past_companies) ? e.past_companies.filter(Boolean) : [],
+      location: e.location || null,
+      geo_fit: VALID_GEO_FIT.includes(e.geo_fit) ? e.geo_fit : null,
+      is_person: e.is_person !== false,
+      signals: signals.length ? signals : [{ signal: stripSensitive(h.description || ""), strength: "gyenge" }],
+      source_url: h.url,
+      source_type: h.source_type,
+      art14_status: h.source_type === "linkedin" || h.source_type === "synthetic" ? "n/a" : "pending_notice",
+      provenance: {
+        method: "firecrawl-public-web",
+        query: h.query,
+        fetched_at: new Date().toISOString(),
+      },
+    };
+  });
+}
+```
+
+Note what changed and why: `input` is now built once outside the retry loop (it doesn't depend on the attempt). The `try/catch` becomes a `for` loop trying up to twice; only on the second (final) failure does it log to `console.error` — so a transient failure that succeeds on retry stays silent (no noise in the common case), but a genuine, persistent failure is no longer silent. `geo_fit` is now validated against `VALID_GEO_FIT` before being stored — any value the model returns that isn't one of the four documented options (including things like the observed `"unclear"`) is coerced to `null`, matching the "unknown/unparseable → null" contract the EXTRACT_TASK prompt already documents for the "no geo_scope" case.
+
+- [ ] **Step 2: Verify the module still loads correctly**
+
+Run: `node -e "import('./core/reach/normalize.js').then(m => console.log(typeof m.normalizeHits))"`
+Expected: `function`
+
+- [ ] **Step 3: Fix 3 in `core/capabilities.js` — make the KIZÁRÁS negative filter conditional on a known client**
+
+Find this exact line inside `queryBuild`'s `task` template literal (unchanged since Task 6):
+
+```
+KIZÁRÁS — KÖTELEZŐ: az ügyfél saját cége SOHA nem lehet célcég, és MINDKÉT lekérdezés-listába (szűk és tág is) negatív szűrőként be kell kerülnie (pl. -"Ügyfél Neve"). Az ügyfél jelenlegi és volt munkatársait a hiring manager amúgy is ismeri; ha bekerülnek a merítésbe, az a keresés hitelét viszi. Az "exclude_companies" listába vedd fel az ügyfél cégét és a felismerhető leányvállalatait.
+```
+
+Replace it with:
+
+```
+KIZÁRÁS — KÖTELEZŐ, HA AZ ÜGYFÉL CÉGE ISMERT: ha a bemenetben szerepel "AZ ÜGYFÉL CÉGE" adat, az a cég SOHA nem lehet célcég, és MINDKÉT lekérdezés-listába (szűk és tág is) negatív szűrőként be kell kerülnie (pl. -"Ügyfél Neve"). Az ügyfél jelenlegi és volt munkatársait a hiring manager amúgy is ismeri; ha bekerülnek a merítésbe, az a keresés hitelét viszi. Az "exclude_companies" listába vedd fel az ügyfél cégét és a felismerhető leányvállalatait. HA AZ ÜGYFÉL CÉGE NEM ISMERT (nincs megadva a bemenetben): SEMMILYEN körülmények között ne találj ki vagy told be helyőrző/placeholder szöveget (pl. "[ÜGYFÉL_CÉGNÉV_MEGADANDÓ]") a lekérdezésekbe — egyszerűen hagyd ki a negatív szűrőt mindkét listából, és az "exclude_companies" legyen üres tömb.
+```
+
+This is a single-line find/replace within the existing `task` template literal — do not touch anything else in `queryBuild` (the JSON schema block, the `basis`/`briefFinal` logic, the `input` construction are all untouched by this task).
+
+- [ ] **Step 4: Write a regression test covering both normalize.js fixes**
+
+Create `scripts/test-normalize-robustness.js`:
+
+```js
+// Egységteszt: normalizeHits geo_fit-validáció (nincs élő API-hívás, brainAvailable csak akkor
+// true, ha van kulcs — ez a teszt a nem-live ágat és a validációs logikát célozza direktben).
+import { normalizeHits } from "../core/reach/normalize.js";
+
+function ok(name, cond) {
+  console.log(`${cond ? "✅" : "❌"} ${name}`);
+  if (!cond) process.exitCode = 1;
+}
+
+// Nincs API-kulcs (vagy legalábbis ez a teszt nem attól függ) → brainAvailable() valószínűleg
+// false ebben a környezetben, így az extracted map üres marad, és minden mező a heurisztikus
+// ágra esik — geo_fit ilyenkor mindig null kell legyen, sosem invalid string.
+const hits = [
+  { url: "https://example.com/a", title: "Teszt Elek - Senior Engineer", description: "desc", source_type: "web", query: "q", excerpt: "" },
+];
+const result = await normalizeHits(hits, { catchment_places: [{ place: "Budapest", country: "Hungary", cross_border: false, note: "x" }] });
+ok("normalizeHits nem dob hibát geoScope-pal, API-hívás nélkül is", Array.isArray(result) && result.length === 1);
+ok("geo_fit heurisztikus ágon null (sosem invalid string)", result[0].geo_fit === null);
+
+console.log("\nnormalize robusztusság-teszt kész.");
+```
+
+- [ ] **Step 5: Run the new test plus the full regression sequence**
+
+Run:
+```bash
+node scripts/test-normalize-robustness.js
+node scripts/test-synthetic-geo.js
+node scripts/test-reach-tiers.js
+env -u ANTHROPIC_API_KEY node scripts/test-query-build-demo.js
+env -u ANTHROPIC_API_KEY node scripts/test-rank-geo.js
+npm run smoke
+node scripts/test-mcp.js
+```
+Expected: every script prints only `✅` lines and exits 0 — this task must not regress anything from Tasks 1-14.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add core/reach/normalize.js core/capabilities.js scripts/test-normalize-robustness.js
+git commit -m "reach+capabilities: validate geo_fit enum, retry failed extraction once, stop inventing a client placeholder when none is given"
+```
+
+- [ ] **Step 7: Re-run a live spot-check if `ANTHROPIC_API_KEY`/`FIRECRAWL_API_KEY` are available**
+
+Not required for task completion (no deterministic way to force the original failure on demand), but if credentials are available, re-running the same kind of live `queryBuild` call with no `position.client` set is a good confirmation that the placeholder string no longer appears in `firecrawl_search_queries`/`firecrawl_search_queries_broad`.
+
+---
+
+### Task 17: Synthetic geo-filter doesn't recognize Hungarian-language country names
+
+**Why this task exists:** Re-running Task 15's location-sensitivity check live (Győr vs Budapest, same brief, `source: "synthetic"`) surfaced a real bug: the live model writes `geo_scope.catchment_places[].country` in Hungarian ("Magyarország", "Szlovákia", "Ausztria" — consistent with the rest of the product's Hungarian-language output), but `core/reach/syntheticReach.js`'s `COUNTRY_NAME_TO_CODE` map (Task 2) only recognizes English names (`hungary`, `poland`, `czechia`, `czech republic`, `romania`, `slovakia`). Every live-generated `geo_scope` therefore maps to zero recognized country codes, `matchesGeo`'s `wantedCodes.size === 0` fail-open rule kicks in, and the synthetic pool filter silently does nothing — every search returns the full 17-candidate pool regardless of location, which is precisely the "just looks for Hungarian candidates" (well, in this case "ignores location entirely") symptom this whole plan set out to fix.
+
+This only affects the **synthetic-pool filter** (Task 2) — it does not affect the live Firecrawl path's per-candidate `geo_fit` classification (Task 3), which reasons freely via the LLM and doesn't depend on any hardcoded country-name map; that path was independently verified correct against live data before this task was written (Budapest/Vienna candidates correctly classified `in_scope`, San Francisco correctly `out_of_scope`). This bug specifically hits the common combination of a live `ANTHROPIC_API_KEY` with `source: "synthetic"` reach (e.g. no `FIRECRAWL_API_KEY` configured, or a recruiter deliberately testing with sample data) — a supported, documented mode per this project's own README.
+
+**Files:**
+- Modify: `core/reach/syntheticReach.js` (the `COUNTRY_NAME_TO_CODE` map only)
+- Test: extend `scripts/test-synthetic-geo.js` (from Task 2) with a case using Hungarian-language country names
+
+**Interfaces:** No signature changes — `matchesGeo`/`gatherSynthetic` behavior only becomes more correct (recognizes more valid country-name spellings), nothing downstream changes.
+
+The current map (verified, current state after Task 2):
+
+```js
+const COUNTRY_NAME_TO_CODE = {
+  hungary: "HU",
+  poland: "PL",
+  czechia: "CZ",
+  "czech republic": "CZ",
+  romania: "RO",
+  slovakia: "SK",
+};
+```
+
+- [ ] **Step 1: Write the failing test**
+
+Add this block to `scripts/test-synthetic-geo.js`, immediately before the final `console.log("\nsyntheticReach geo-szűrés teszt kész.");` line:
+
+```js
+// 6) A geo_scope.country mezőt a live LLM magyarul írja (pl. "Magyarország") — a szűrésnek
+// ezt is fel kell ismernie, nem csak az angol elnevezéseket.
+const hungarianNames = await gatherSynthetic("", {
+  catchment_places: [{ place: "Budapest", country: "Magyarország", cross_border: false, note: "anchor, magyar nyelvű ország-mező" }],
+});
+ok("Magyar nyelvű ország-mező ('Magyarország') → csak magyar helyszínű jelöltek (nem esik vissza a teljes poolra)", hungarianNames.length > 0 && hungarianNames.length < 17 && hungarianNames.every((c) => c.location.trim().toUpperCase().endsWith("HU")));
+
+const hungarianMulti = await gatherSynthetic("", {
+  catchment_places: [
+    { place: "Győr", country: "Magyarország", cross_border: false, note: "anchor" },
+    { place: "Dunaszerdahely", country: "Szlovákia", cross_border: true, note: "határon-átnyúló" },
+  ],
+});
+ok("Magyar nyelvű 'Szlovákia' is felismerve → SK jelölt is bekerül", hungarianMulti.some((c) => c.location.trim().toUpperCase().endsWith("SK")));
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `node scripts/test-synthetic-geo.js`
+Expected: the two new assertions fail (current map doesn't recognize "Magyarország"/"Szlovákia", so `wantedCodes.size === 0` and the fail-open rule returns the full 17-candidate pool instead of a filtered subset).
+
+- [ ] **Step 3: Extend the country-name map**
+
+Replace the `COUNTRY_NAME_TO_CODE` map above with:
+
+```js
+const COUNTRY_NAME_TO_CODE = {
+  hungary: "HU",
+  magyarország: "HU",
+  poland: "PL",
+  lengyelország: "PL",
+  czechia: "CZ",
+  "czech republic": "CZ",
+  csehország: "CZ",
+  csehia: "CZ",
+  romania: "RO",
+  románia: "RO",
+  slovakia: "SK",
+  szlovákia: "SK",
+};
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `node scripts/test-synthetic-geo.js`
+Expected: all assertions (the original 6 from Task 2 plus the 2 new ones) print `✅`, exit code 0.
+
+- [ ] **Step 5: Run the full regression sequence**
+
+```bash
+node scripts/test-synthetic-geo.js
+node scripts/test-reach-tiers.js
+node scripts/test-normalize-robustness.js
+env -u ANTHROPIC_API_KEY node scripts/test-query-build-demo.js
+env -u ANTHROPIC_API_KEY node scripts/test-rank-geo.js
+node scripts/test-mcp.js
+```
+Expected: every script ✅ (note: `npm run smoke` is deliberately excluded here — it hits the known, already-documented, out-of-scope `rankTargets`/`run()` live flake unrelated to this task; don't chase it).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add core/reach/syntheticReach.js scripts/test-synthetic-geo.js
+git commit -m "reach: recognize Hungarian-language country names in synthetic geo-filter"
+```
+
+- [ ] **Step 7: Live spot-check if credentials are available**
+
+Not required for task completion, but if `ANTHROPIC_API_KEY` is set, re-running a live `queryBuild` call for two different Hungarian anchor cities with `source: "synthetic"` discovery and confirming the returned candidate subsets now actually differ (not both falling back to the full 17) is the direct confirmation this bug is fixed for real live output, not just the two literal country strings the test hardcodes.
+
+---
+
+### Task 18: Final-review fixes — fold geo_scope into the actual query strings; soften the geo_fit "mismatch" badge
+
+**Why this task exists:** The final whole-branch review found one Important, load-bearing gap and one Important UX consideration:
+
+1. **Spec §1 explicitly required `geo_scope.catchment_places` to be folded into both `firecrawl_search_queries` and `firecrawl_search_queries_broad` — this never made it into the actual `queryBuild` task prompt.** Part (1) of the prompt (query generation) only ever talks about must-haves; part (2) (geo_scope generation) never connects back to the query strings. The result: in live Firecrawl mode, geography is computed and used to *classify* candidates after the fact (`geo_fit`, Task 3) and to *filter* the synthetic demo pool (Task 2/17), but it never actually *drives what gets searched for* — the one thing the empirically-validated elasticity calibration (a `tight` clerk search vs. a `loose` GM search) was supposed to change. This is half the point of the whole feature. Compounding it: `geo_scope` is the last key in the output JSON schema while the query arrays are near the first, and since generation is autoregressive, the model commits to its queries before reasoning through geography — reordering the schema is necessary, not just cosmetic.
+2. **The strategy-chat assistant can add a query for a place `geo_scope` never covers (e.g. "add a Vienna query"), and the resulting candidates get labeled `out_of_scope` and get held against them in ranking** — correct given `geo_scope` is deliberately read-only (spec §7), but the product ends up visibly arguing with an explicit recruiter instruction. Reviewer-recommended cheap fix: reword the badge from a verdict ("helyszín: eltér" / "location: mismatch") to an observation, so it reads as "this is what the AI's plan assumed," not "this candidate is wrong."
+
+**Files:**
+- Modify: `core/capabilities.js` (the `queryBuild` task prompt — reorder + add one bridging instruction + reorder the JSON schema block)
+- Modify: `app/public/app.js` (the `geoFitChip` helper — wording only)
+
+**Interfaces:** No signature changes anywhere.
+
+The current `queryBuild` task prompt (verified, current state after Task 16):
+
+```js
+  const task = `FELADAT: Készíts keresési tervet HÁROM részben.
+
+(1) LEKÉRDEZÉSEK: "firecrawl_search_queries" — a SZŰK kör, ami a nyilvános webes felkutatást vezérli (Google-stílusú, site: operátorokkal, senior tech / CEE fókusz), az elengedhetetlen feltételek (must_haves) mindegyikét ÉSelve. ÉS "firecrawl_search_queries_broad" — a TÁG kör: csak a szerep magja (cím/terület), az elengedhetetlen feltételek szigorú kombinációja NÉLKÜL; ez akkor kerül ténylegesen lekérdezésre, ha a szűk kör kevés találatot hoz. Boolean lekérdezéseket is adj a szokásos platformokra.
+${LANG}
+KIZÁRÁS — KÖTELEZŐ, HA AZ ÜGYFÉL CÉGE ISMERT: ha a bemenetben szerepel "AZ ÜGYFÉL CÉGE" adat, az a cég SOHA nem lehet célcég, és MINDKÉT lekérdezés-listába (szűk és tág is) negatív szűrőként be kell kerülnie (pl. -"Ügyfél Neve"). Az ügyfél jelenlegi és volt munkatársait a hiring manager amúgy is ismeri; ha bekerülnek a merítésbe, az a keresés hitelét viszi. Az "exclude_companies" listába vedd fel az ügyfél cégét és a felismerhető leányvállalatait. HA AZ ÜGYFÉL CÉGE NEM ISMERT (nincs megadva a bemenetben): SEMMILYEN körülmények között ne találj ki vagy told be helyőrző/placeholder szöveget (pl. "[ÜGYFÉL_CÉGNÉV_MEGADANDÓ]") a lekérdezésekbe — egyszerűen hagyd ki a negatív szűrőt mindkét listából, és az "exclude_companies" legyen üres tömb.
+
+(2) FÖLDRAJZI HATÓKÖR ("geo_scope"): gondolkodj el a szerep valódi keresési földrajzán. Elsőként reálisan, megnevezett helyekben gondolkodj (akár országhatáron át is, ha egy külföldi hely road-távolságban közelebb van, mint egy belföldi) — csak olyan helyet vegyél fel, amire konkrét, evidencia-alapú indokod van (valós ingázási folyosó, ismert vonzáskörzeti település, dokumentált határon-átnyúló munkaerő-mozgás); ne told fel a listát spekulatív, "néha idesorolható" helyekkel. NE adj meg konkrét perc- vagy km-adatot — ehhez nincs megbízható adatod, csak relatív/összehasonlító ítéleted lehet ("X közelebb van az anchorhoz, mint Y"). Az anchor (a megbízás helyszíne, position.location) MINDIG szerepeljen a catchment_places listában, a rugalmasságtól függetlenül.
+
+Másodjára állapítsd meg a "search_elasticity" értéket (tight|moderate|loose) — ez azt fejezi ki, mennyire kell a keresést földrajzilag megkötni, és a szerep valós piaci utánpótlási mintázatából következik, NEM a munkavégzés helyszínéből (helyszíni/hibrid/távoli) és NEM abból, hogy a helylista hosszú-e vagy határon átnyúlik-e:
+- "tight": belépő szintű, nagy volumenű, műszakos vagy más módon helyettesíthető/bőséges helyi munkaerő-kínálatú szerep, fizikai jelenléttel. Behatárolt helyi/céges-buszjárat vonzáskörzet.
+- "moderate": senior IC / szakértő / csoportvezetői szerep valós, de részleges helyszíni elvárással. Szélesebb, akár régiós/határon-átnyúló ingázási terület, de nem költözés-alapú keresés.
+- "loose": valódi felsővezetői/C-szintű vagy ritka szakértői keresés, amit jellemzően országosan vagy nemzetközileg töltenek be, ahol a költözés/nem-napi ingázás a norma. Ilyenkor ne ingázási sugárban gondolkodj, hanem országos/nemzetközi tehetségpiacban.
+
+Mielőtt lezárnád: ellenőrizd, hogy a "search_elasticity" összhangban van-e a földrajzi indoklásoddal — ha behatárolt helyi/buszjárat-vonzáskörzetet írtál le, az elasticity nem lehet "loose"; ha országos/ritka-szakértői tehetségpiacról írtál, ne írj le egyúttal szűk ingázó-települések gyűrűjét. Ha a kettő nem egyezik, javítsd az egyiket, mielőtt válaszolsz. "loose" rugalmasság esetén is adj meg valós, konkrét helyeket (pl. domináns szakmai-vezetői központokat, releváns nemzetközi csomópontokat a brief kontextusához kötve) — az üres lista nem elfogadható válasz.
+
+(3) Célcégek, célpozíciók, kulcs-szinonimák — a szokásos módon.
+
+Kimeneti JSON séma:
+{
+ "boolean_queries": [ { "platform": "linkedin-xray|github|google", "query": "<lekérdezés, az ügyfél negatív szűrőjével>" } ],
+ "firecrawl_search_queries": ["<3-4 szűk lekérdezés, site: operátorokkal, az ügyfél negatív szűrőjével>"],
+ "firecrawl_search_queries_broad": ["<2-3 tág lekérdezés, site: operátorokkal, az ügyfél negatív szűrőjével>"],
+ "target_companies": ["<az ügyfél cége NEM szerepelhet itt>"],
+ "target_titles": ["..."],
+ "synonyms": ["..."],
+ "exclude_companies": ["<az ügyfél cége és leányvállalatai — off-limits>"],
+ "exclusion_note": "<egy mondat: kinek a munkatársai maradnak ki a merítésből és miért>",
+ "geo_scope": {
+   "search_elasticity": "tight|moderate|loose",
+   "anchor": "<position.location visszaadva>",
+   "catchment_places": [ { "place": "...", "country": "...", "cross_border": true, "note": "<konkrét, evidencia-alapú indok>" } ],
+   "rationale": "<földrajzi indoklás + elasticity-indoklás együtt, önellentmondás-mentesen>"
+ }
+}`;
+```
+
+- [ ] **Step 1: Reorder and connect the prompt — geography first, queries reference it explicitly**
+
+Replace the entire `task` template literal above with:
+
+```js
+  const task = `FELADAT: Készíts keresési tervet HÁROM részben.
+
+(1) FÖLDRAJZI HATÓKÖR ("geo_scope"): gondolkodj el a szerep valódi keresési földrajzán, MIELŐTT a lekérdezéseket megírnád — a lekérdezések ebből fognak építkezni. Elsőként reálisan, megnevezett helyekben gondolkodj (akár országhatáron át is, ha egy külföldi hely road-távolságban közelebb van, mint egy belföldi) — csak olyan helyet vegyél fel, amire konkrét, evidencia-alapú indokod van (valós ingázási folyosó, ismert vonzáskörzeti település, dokumentált határon-átnyúló munkaerő-mozgás); ne told fel a listát spekulatív, "néha idesorolható" helyekkel. NE adj meg konkrét perc- vagy km-adatot — ehhez nincs megbízható adatod, csak relatív/összehasonlító ítéleted lehet ("X közelebb van az anchorhoz, mint Y"). Az anchor (a megbízás helyszíne, position.location) MINDIG szerepeljen a catchment_places listában, a rugalmasságtól függetlenül.
+
+Másodjára állapítsd meg a "search_elasticity" értéket (tight|moderate|loose) — ez azt fejezi ki, mennyire kell a keresést földrajzilag megkötni, és a szerep valós piaci utánpótlási mintázatából következik, NEM a munkavégzés helyszínéből (helyszíni/hibrid/távoli) és NEM abból, hogy a helylista hosszú-e vagy határon átnyúlik-e:
+- "tight": belépő szintű, nagy volumenű, műszakos vagy más módon helyettesíthető/bőséges helyi munkaerő-kínálatú szerep, fizikai jelenléttel. Behatárolt helyi/céges-buszjárat vonzáskörzet.
+- "moderate": senior IC / szakértő / csoportvezetői szerep valós, de részleges helyszíni elvárással. Szélesebb, akár régiós/határon-átnyúló ingázási terület, de nem költözés-alapú keresés.
+- "loose": valódi felsővezetői/C-szintű vagy ritka szakértői keresés, amit jellemzően országosan vagy nemzetközileg töltenek be, ahol a költözés/nem-napi ingázás a norma. Ilyenkor ne ingázási sugárban gondolkodj, hanem országos/nemzetközi tehetségpiacban.
+
+Mielőtt továbblépnél: ellenőrizd, hogy a "search_elasticity" összhangban van-e a földrajzi indoklásoddal — ha behatárolt helyi/buszjárat-vonzáskörzetet írtál le, az elasticity nem lehet "loose"; ha országos/ritka-szakértői tehetségpiacról írtál, ne írj le egyúttal szűk ingázó-települések gyűrűjét. Ha a kettő nem egyezik, javítsd az egyiket. "loose" rugalmasság esetén is adj meg valós, konkrét helyeket (pl. domináns szakmai-vezetői központokat, releváns nemzetközi csomópontokat a brief kontextusához kötve) — az üres lista nem elfogadható válasz.
+
+(2) LEKÉRDEZÉSEK: "firecrawl_search_queries" — a SZŰK kör, ami a nyilvános webes felkutatást vezérli (Google-stílusú, site: operátorokkal, senior tech / CEE fókusz), az elengedhetetlen feltételek (must_haves) mindegyikét ÉSelve. ÉS "firecrawl_search_queries_broad" — a TÁG kör: csak a szerep magja (cím/terület), az elengedhetetlen feltételek szigorú kombinációja NÉLKÜL; ez akkor kerül ténylegesen lekérdezésre, ha a szűk kör kevés találatot hoz. MINDKÉT listába sződ bele az (1) pontban megírt geo_scope.catchment_places helyeit releváns helymegjelölésként (pl. a catchment helynevei OR-kapcsolással, ahogy egy éles kereső-lekérdezésben természetes lenne) — a lekérdezések földrajza kövesse a te saját geo_scope-indoklásodat, ne csak a position.location szó szerinti nevét. Boolean lekérdezéseket is adj a szokásos platformokra.
+${LANG}
+KIZÁRÁS — KÖTELEZŐ, HA AZ ÜGYFÉL CÉGE ISMERT: ha a bemenetben szerepel "AZ ÜGYFÉL CÉGE" adat, az a cég SOHA nem lehet célcég, és MINDKÉT lekérdezés-listába (szűk és tág is) negatív szűrőként be kell kerülnie (pl. -"Ügyfél Neve"). Az ügyfél jelenlegi és volt munkatársait a hiring manager amúgy is ismeri; ha bekerülnek a merítésbe, az a keresés hitelét viszi. Az "exclude_companies" listába vedd fel az ügyfél cégét és a felismerhető leányvállalatait. HA AZ ÜGYFÉL CÉGE NEM ISMERT (nincs megadva a bemenetben): SEMMILYEN körülmények között ne találj ki vagy told be helyőrző/placeholder szöveget (pl. "[ÜGYFÉL_CÉGNÉV_MEGADANDÓ]") a lekérdezésekbe — egyszerűen hagyd ki a negatív szűrőt mindkét listából, és az "exclude_companies" legyen üres tömb.
+
+(3) Célcégek, célpozíciók, kulcs-szinonimák — a szokásos módon.
+
+Kimeneti JSON séma (a mezők ebben a sorrendben, hogy a geo_scope megelőzze a lekérdezéseket):
+{
+ "boolean_queries": [ { "platform": "linkedin-xray|github|google", "query": "<lekérdezés, az ügyfél negatív szűrőjével>" } ],
+ "geo_scope": {
+   "search_elasticity": "tight|moderate|loose",
+   "anchor": "<position.location visszaadva>",
+   "catchment_places": [ { "place": "...", "country": "...", "cross_border": true, "note": "<konkrét, evidencia-alapú indok>" } ],
+   "rationale": "<földrajzi indoklás + elasticity-indoklás együtt, önellentmondás-mentesen>"
+ },
+ "firecrawl_search_queries": ["<3-4 szűk lekérdezés, site: operátorokkal, a geo_scope helyeivel és az ügyfél negatív szűrőjével>"],
+ "firecrawl_search_queries_broad": ["<2-3 tág lekérdezés, site: operátorokkal, a geo_scope helyeivel és az ügyfél negatív szűrőjével>"],
+ "target_companies": ["<az ügyfél cége NEM szerepelhet itt>"],
+ "target_titles": ["..."],
+ "synonyms": ["..."],
+ "exclude_companies": ["<az ügyfél cége és leányvállalatai — off-limits>"],
+ "exclusion_note": "<egy mondat: kinek a munkatársai maradnak ki a merítésből és miért>"
+}`;
+```
+
+What changed and why: sections (1) and (2) swapped, so the model reasons through geography before committing to query strings — the JSON schema's field order was moved to match (`geo_scope` now precedes both query arrays), since generation is autoregressive and schema order shapes emission order. Part (2)'s own text now explicitly instructs folding `catchment_places` into both query lists. The KIZÁRÁS paragraph and part (3) are otherwise untouched (same content, just renumbered/repositioned relative to the swap). No field was added, removed, or renamed — this is a reordering + one bridging sentence, not a schema change.
+
+- [ ] **Step 2: Verify demo mode still matches (no live call needed for this check)**
+
+Run: `env -u ANTHROPIC_API_KEY node scripts/test-query-build-demo.js`
+Expected: all 8 `✅` lines, exit 0 — this test only checks field presence/shape, not prompt wording, so it should be unaffected. This confirms the edit didn't break the function syntactically.
+
+- [ ] **Step 3: Soften the geo_fit "mismatch" badge wording**
+
+In `app/public/app.js`, find:
+
+```js
+function geoFitChip(geoFit) {
+  if (!geoFit || geoFit === "unknown") return "";
+  const cls = geoFit === "in_scope" ? "good" : geoFit === "out_of_scope" ? "bad" : "warn";
+  const label = geoFit === "in_scope" ? "helyszín: illeszkedik" : geoFit === "out_of_scope" ? "helyszín: eltér" : "helyszín: bizonytalan";
+  return `<span class="chip ${cls}">${esc(label)}</span>`;
+}
+```
+
+Replace with:
+
+```js
+function geoFitChip(geoFit) {
+  if (!geoFit || geoFit === "unknown") return "";
+  const cls = geoFit === "in_scope" ? "good" : geoFit === "out_of_scope" ? "bad" : "warn";
+  const label = geoFit === "in_scope" ? "helyszín: AI-terv szerint illeszkedik" : geoFit === "out_of_scope" ? "helyszín: AI-terv szerint eltér" : "helyszín: AI-terv szerint bizonytalan";
+  return `<span class="chip ${cls}">${esc(label)}</span>`;
+}
+```
+
+This is deliberately a small wording change, not a suppression/conditional-logic change — it reframes the badge as reporting what the AI's search plan assumed ("AI-terv szerint" = "per the AI plan"), not as an independent verdict on the candidate, so it doesn't read as the product contradicting a recruiter who deliberately searched outside the plan's original geography.
+
+- [ ] **Step 4: Manual verification**
+
+Run: `npm run app`, open a project, confirm the Jelöltek view still renders without console errors (synthetic candidates have `geo_fit: null` so the badge won't show — this is a smoke check that the string change didn't introduce a syntax error, not a visual check of the new wording, which needs a live candidate to see).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add core/capabilities.js app/public/app.js
+git commit -m "capabilities+ui: fold geo_scope into both query tiers, reorder schema so geography precedes queries, soften geo_fit badge wording"
+```
+
+- [ ] **Step 6: Live spot-check if credentials are available**
+
+Not required for task completion, but if `ANTHROPIC_API_KEY` is set, re-running a live `queryBuild` call and confirming `firecrawl_search_queries`/`firecrawl_search_queries_broad` now actually contain place names from `geo_scope.catchment_places` (not just `position.location`'s literal string) is the direct confirmation this fix works on real output, not just passes the unaffected demo-mode test.

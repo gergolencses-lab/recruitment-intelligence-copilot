@@ -125,8 +125,10 @@ app.post("/api/project/:id/discover", A(async (req, res) => {
   if (!p) return;
   const source = (req.body && req.body.source) || undefined;
   const sq = (p.query && p.query.firecrawl_search_queries) || [];
+  const broadSq = (p.query && p.query.firecrawl_search_queries_broad) || [];
+  const geoScope = (p.query && p.query.geo_scope) || null;
   const client = (p.position && p.position.client) || "";
-  const result = await ric.discoverCandidates({ searchQueries: sq, source, client }, { projectId: p.id });
+  const result = await ric.discoverCandidates({ searchQueries: sq, broadSearchQueries: broadSq, geoScope, source, client }, { projectId: p.id });
   p.candidates = result.candidates;
   p.discover_note = result.note;
   p.discover_source = result.source;

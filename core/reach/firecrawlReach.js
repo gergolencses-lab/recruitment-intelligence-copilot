@@ -65,10 +65,10 @@ function isDeepScrapable(sourceType) {
 }
 
 /**
- * Nyers találatok gyűjtése több keresési lekérdezésből, majd a legígéretesebbek
- * mély scrapelése. Visszaad: [{url, title, description, source_type, excerpt, query}]
+ * Keresés (nincs scrapelés) több lekérdezésből, URL szerint dedupelve.
+ * Visszaad: [{url, title, description, source_type, excerpt: "", query}]
  */
-export async function gatherHits(queries, { onProgress } = {}) {
+export async function searchHits(queries, { onProgress } = {}) {
   const capped = (queries || []).filter(Boolean).slice(0, 5);
   const seen = new Map();
 
@@ -94,15 +94,20 @@ export async function gatherHits(queries, { onProgress } = {}) {
     }
   }
 
-  const hits = [...seen.values()];
+  return [...seen.values()];
+}
 
-  // Mély scrapelés a top scrapelhető találatokra.
-  const scrapable = hits.filter((h) => isDeepScrapable(h.source_type)).slice(0, config.reachScrapeTop);
+/**
+ * Mély scrapelés a legígéretesebb (scrapelhető típusú) találatokra, egyszer,
+ * a teljes (esetlegesen szűk+tág körből összefésült) hit-halmazon.
+ * A bemeneti tömböt módosítja és adja vissza.
+ */
+export async function scrapeTopHits(hits, { onProgress } = {}) {
+  const scrapable = hits.filter((h) => isDeepScrapable(h.source_type) && !h.excerpt).slice(0, config.reachScrapeTop);
   for (const h of scrapable) {
     onProgress && onProgress(`Scrapelés: ${h.url}`);
     const s = await scrape(h.url);
     h.excerpt = (s.markdown || "").slice(0, 1600);
   }
-
   return hits;
 }

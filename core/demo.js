@@ -45,6 +45,10 @@ export const demo = {
         "craft conf speaker distributed systems payments CEE",
         "principal platform engineer Kubernetes SRE Krakow OR Prague site:linkedin.com/in" + neg,
       ],
+      firecrawl_search_queries_broad: [
+        "staff engineer OR principal engineer payments Budapest OR CEE" + neg,
+        "platform engineer Kubernetes CEE site:linkedin.com/in" + neg,
+      ],
       target_companies: ["(régiós fintechek)", "(neobankok)", "(payment PSP-k)", "(infra startupok)"],
       target_titles: ["Staff Engineer", "Principal Engineer", "Tech Lead", "Engineering Manager (hands-on)"],
       synonyms: ["distributed systems", "payments core", "high-throughput", "event-sourcing", "SRE"],
@@ -52,6 +56,16 @@ export const demo = {
       exclusion_note: client
         ? `Az ügyfél (${client}) jelenlegi és volt munkatársai nem kerülnek a merítésbe — őket a hiring manager amúgy is ismeri.`
         : "Add meg az ügyfél nevét a pozícióadatoknál, hogy a saját munkatársai automatikusan kimaradjanak.",
+      geo_scope: {
+        search_elasticity: "moderate",
+        anchor: "Budapest, HU",
+        catchment_places: [
+          { place: "Budapest", country: "Hungary", cross_border: false, note: "A megbízás helyszíne — a jelöltpiac magja." },
+          { place: "Győr", country: "Hungary", cross_border: false, note: "Regionális tech-hub, hibrid munkavégzéssel elérhető távolság." },
+          { place: "Bratislava", country: "Slovakia", cross_border: true, note: "Vasúti/autópálya-kapcsolat Budapesttel, valós CEE senior tech ingázási/hibrid folyosó." },
+        ],
+        rationale: "Hibrid, senior egyéni-szakértői/tech-lead jellegű szerep — szélesebb, akár határon-átnyúló ingázási területet enged meg, de nem országos költözés-alapú keresést, ezért 'moderate'.",
+      },
     };
   },
 
