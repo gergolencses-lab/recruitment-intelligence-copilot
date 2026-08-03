@@ -13,6 +13,8 @@ data/
 # Eval nyers kimenetek (élő Firecrawl valós-személy adatot tartalmazhat)
 eval/results/
 eval/scores/
+# A 4x4 rács nyers futásai valódi személyek nevét/URL-jét tartalmazzák — soha nem kerülnek verziókövetésbe.
+eval/geo-grid/runs/
 .claude/
 
 # SDD implementation worktrees (scratch, per-plan)
