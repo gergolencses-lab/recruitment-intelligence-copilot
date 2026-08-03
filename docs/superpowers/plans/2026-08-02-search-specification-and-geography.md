@@ -1905,3 +1905,146 @@ git commit -m "reach: recognize Hungarian-language country names in synthetic ge
 - [ ] **Step 7: Live spot-check if credentials are available**
 
 Not required for task completion, but if `ANTHROPIC_API_KEY` is set, re-running a live `queryBuild` call for two different Hungarian anchor cities with `source: "synthetic"` discovery and confirming the returned candidate subsets now actually differ (not both falling back to the full 17) is the direct confirmation this bug is fixed for real live output, not just the two literal country strings the test hardcodes.
+
+---
+
+### Task 18: Final-review fixes — fold geo_scope into the actual query strings; soften the geo_fit "mismatch" badge
+
+**Why this task exists:** The final whole-branch review found one Important, load-bearing gap and one Important UX consideration:
+
+1. **Spec §1 explicitly required `geo_scope.catchment_places` to be folded into both `firecrawl_search_queries` and `firecrawl_search_queries_broad` — this never made it into the actual `queryBuild` task prompt.** Part (1) of the prompt (query generation) only ever talks about must-haves; part (2) (geo_scope generation) never connects back to the query strings. The result: in live Firecrawl mode, geography is computed and used to *classify* candidates after the fact (`geo_fit`, Task 3) and to *filter* the synthetic demo pool (Task 2/17), but it never actually *drives what gets searched for* — the one thing the empirically-validated elasticity calibration (a `tight` clerk search vs. a `loose` GM search) was supposed to change. This is half the point of the whole feature. Compounding it: `geo_scope` is the last key in the output JSON schema while the query arrays are near the first, and since generation is autoregressive, the model commits to its queries before reasoning through geography — reordering the schema is necessary, not just cosmetic.
+2. **The strategy-chat assistant can add a query for a place `geo_scope` never covers (e.g. "add a Vienna query"), and the resulting candidates get labeled `out_of_scope` and get held against them in ranking** — correct given `geo_scope` is deliberately read-only (spec §7), but the product ends up visibly arguing with an explicit recruiter instruction. Reviewer-recommended cheap fix: reword the badge from a verdict ("helyszín: eltér" / "location: mismatch") to an observation, so it reads as "this is what the AI's plan assumed," not "this candidate is wrong."
+
+**Files:**
+- Modify: `core/capabilities.js` (the `queryBuild` task prompt — reorder + add one bridging instruction + reorder the JSON schema block)
+- Modify: `app/public/app.js` (the `geoFitChip` helper — wording only)
+
+**Interfaces:** No signature changes anywhere.
+
+The current `queryBuild` task prompt (verified, current state after Task 16):
+
+```js
+  const task = `FELADAT: Készíts keresési tervet HÁROM részben.
+
+(1) LEKÉRDEZÉSEK: "firecrawl_search_queries" — a SZŰK kör, ami a nyilvános webes felkutatást vezérli (Google-stílusú, site: operátorokkal, senior tech / CEE fókusz), az elengedhetetlen feltételek (must_haves) mindegyikét ÉSelve. ÉS "firecrawl_search_queries_broad" — a TÁG kör: csak a szerep magja (cím/terület), az elengedhetetlen feltételek szigorú kombinációja NÉLKÜL; ez akkor kerül ténylegesen lekérdezésre, ha a szűk kör kevés találatot hoz. Boolean lekérdezéseket is adj a szokásos platformokra.
+${LANG}
+KIZÁRÁS — KÖTELEZŐ, HA AZ ÜGYFÉL CÉGE ISMERT: ha a bemenetben szerepel "AZ ÜGYFÉL CÉGE" adat, az a cég SOHA nem lehet célcég, és MINDKÉT lekérdezés-listába (szűk és tág is) negatív szűrőként be kell kerülnie (pl. -"Ügyfél Neve"). Az ügyfél jelenlegi és volt munkatársait a hiring manager amúgy is ismeri; ha bekerülnek a merítésbe, az a keresés hitelét viszi. Az "exclude_companies" listába vedd fel az ügyfél cégét és a felismerhető leányvállalatait. HA AZ ÜGYFÉL CÉGE NEM ISMERT (nincs megadva a bemenetben): SEMMILYEN körülmények között ne találj ki vagy told be helyőrző/placeholder szöveget (pl. "[ÜGYFÉL_CÉGNÉV_MEGADANDÓ]") a lekérdezésekbe — egyszerűen hagyd ki a negatív szűrőt mindkét listából, és az "exclude_companies" legyen üres tömb.
+
+(2) FÖLDRAJZI HATÓKÖR ("geo_scope"): gondolkodj el a szerep valódi keresési földrajzán. Elsőként reálisan, megnevezett helyekben gondolkodj (akár országhatáron át is, ha egy külföldi hely road-távolságban közelebb van, mint egy belföldi) — csak olyan helyet vegyél fel, amire konkrét, evidencia-alapú indokod van (valós ingázási folyosó, ismert vonzáskörzeti település, dokumentált határon-átnyúló munkaerő-mozgás); ne told fel a listát spekulatív, "néha idesorolható" helyekkel. NE adj meg konkrét perc- vagy km-adatot — ehhez nincs megbízható adatod, csak relatív/összehasonlító ítéleted lehet ("X közelebb van az anchorhoz, mint Y"). Az anchor (a megbízás helyszíne, position.location) MINDIG szerepeljen a catchment_places listában, a rugalmasságtól függetlenül.
+
+Másodjára állapítsd meg a "search_elasticity" értéket (tight|moderate|loose) — ez azt fejezi ki, mennyire kell a keresést földrajzilag megkötni, és a szerep valós piaci utánpótlási mintázatából következik, NEM a munkavégzés helyszínéből (helyszíni/hibrid/távoli) és NEM abból, hogy a helylista hosszú-e vagy határon átnyúlik-e:
+- "tight": belépő szintű, nagy volumenű, műszakos vagy más módon helyettesíthető/bőséges helyi munkaerő-kínálatú szerep, fizikai jelenléttel. Behatárolt helyi/céges-buszjárat vonzáskörzet.
+- "moderate": senior IC / szakértő / csoportvezetői szerep valós, de részleges helyszíni elvárással. Szélesebb, akár régiós/határon-átnyúló ingázási terület, de nem költözés-alapú keresés.
+- "loose": valódi felsővezetői/C-szintű vagy ritka szakértői keresés, amit jellemzően országosan vagy nemzetközileg töltenek be, ahol a költözés/nem-napi ingázás a norma. Ilyenkor ne ingázási sugárban gondolkodj, hanem országos/nemzetközi tehetségpiacban.
+
+Mielőtt lezárnád: ellenőrizd, hogy a "search_elasticity" összhangban van-e a földrajzi indoklásoddal — ha behatárolt helyi/buszjárat-vonzáskörzetet írtál le, az elasticity nem lehet "loose"; ha országos/ritka-szakértői tehetségpiacról írtál, ne írj le egyúttal szűk ingázó-települések gyűrűjét. Ha a kettő nem egyezik, javítsd az egyiket, mielőtt válaszolsz. "loose" rugalmasság esetén is adj meg valós, konkrét helyeket (pl. domináns szakmai-vezetői központokat, releváns nemzetközi csomópontokat a brief kontextusához kötve) — az üres lista nem elfogadható válasz.
+
+(3) Célcégek, célpozíciók, kulcs-szinonimák — a szokásos módon.
+
+Kimeneti JSON séma:
+{
+ "boolean_queries": [ { "platform": "linkedin-xray|github|google", "query": "<lekérdezés, az ügyfél negatív szűrőjével>" } ],
+ "firecrawl_search_queries": ["<3-4 szűk lekérdezés, site: operátorokkal, az ügyfél negatív szűrőjével>"],
+ "firecrawl_search_queries_broad": ["<2-3 tág lekérdezés, site: operátorokkal, az ügyfél negatív szűrőjével>"],
+ "target_companies": ["<az ügyfél cége NEM szerepelhet itt>"],
+ "target_titles": ["..."],
+ "synonyms": ["..."],
+ "exclude_companies": ["<az ügyfél cége és leányvállalatai — off-limits>"],
+ "exclusion_note": "<egy mondat: kinek a munkatársai maradnak ki a merítésből és miért>",
+ "geo_scope": {
+   "search_elasticity": "tight|moderate|loose",
+   "anchor": "<position.location visszaadva>",
+   "catchment_places": [ { "place": "...", "country": "...", "cross_border": true, "note": "<konkrét, evidencia-alapú indok>" } ],
+   "rationale": "<földrajzi indoklás + elasticity-indoklás együtt, önellentmondás-mentesen>"
+ }
+}`;
+```
+
+- [ ] **Step 1: Reorder and connect the prompt — geography first, queries reference it explicitly**
+
+Replace the entire `task` template literal above with:
+
+```js
+  const task = `FELADAT: Készíts keresési tervet HÁROM részben.
+
+(1) FÖLDRAJZI HATÓKÖR ("geo_scope"): gondolkodj el a szerep valódi keresési földrajzán, MIELŐTT a lekérdezéseket megírnád — a lekérdezések ebből fognak építkezni. Elsőként reálisan, megnevezett helyekben gondolkodj (akár országhatáron át is, ha egy külföldi hely road-távolságban közelebb van, mint egy belföldi) — csak olyan helyet vegyél fel, amire konkrét, evidencia-alapú indokod van (valós ingázási folyosó, ismert vonzáskörzeti település, dokumentált határon-átnyúló munkaerő-mozgás); ne told fel a listát spekulatív, "néha idesorolható" helyekkel. NE adj meg konkrét perc- vagy km-adatot — ehhez nincs megbízható adatod, csak relatív/összehasonlító ítéleted lehet ("X közelebb van az anchorhoz, mint Y"). Az anchor (a megbízás helyszíne, position.location) MINDIG szerepeljen a catchment_places listában, a rugalmasságtól függetlenül.
+
+Másodjára állapítsd meg a "search_elasticity" értéket (tight|moderate|loose) — ez azt fejezi ki, mennyire kell a keresést földrajzilag megkötni, és a szerep valós piaci utánpótlási mintázatából következik, NEM a munkavégzés helyszínéből (helyszíni/hibrid/távoli) és NEM abból, hogy a helylista hosszú-e vagy határon átnyúlik-e:
+- "tight": belépő szintű, nagy volumenű, műszakos vagy más módon helyettesíthető/bőséges helyi munkaerő-kínálatú szerep, fizikai jelenléttel. Behatárolt helyi/céges-buszjárat vonzáskörzet.
+- "moderate": senior IC / szakértő / csoportvezetői szerep valós, de részleges helyszíni elvárással. Szélesebb, akár régiós/határon-átnyúló ingázási terület, de nem költözés-alapú keresés.
+- "loose": valódi felsővezetői/C-szintű vagy ritka szakértői keresés, amit jellemzően országosan vagy nemzetközileg töltenek be, ahol a költözés/nem-napi ingázás a norma. Ilyenkor ne ingázási sugárban gondolkodj, hanem országos/nemzetközi tehetségpiacban.
+
+Mielőtt továbblépnél: ellenőrizd, hogy a "search_elasticity" összhangban van-e a földrajzi indoklásoddal — ha behatárolt helyi/buszjárat-vonzáskörzetet írtál le, az elasticity nem lehet "loose"; ha országos/ritka-szakértői tehetségpiacról írtál, ne írj le egyúttal szűk ingázó-települések gyűrűjét. Ha a kettő nem egyezik, javítsd az egyiket. "loose" rugalmasság esetén is adj meg valós, konkrét helyeket (pl. domináns szakmai-vezetői központokat, releváns nemzetközi csomópontokat a brief kontextusához kötve) — az üres lista nem elfogadható válasz.
+
+(2) LEKÉRDEZÉSEK: "firecrawl_search_queries" — a SZŰK kör, ami a nyilvános webes felkutatást vezérli (Google-stílusú, site: operátorokkal, senior tech / CEE fókusz), az elengedhetetlen feltételek (must_haves) mindegyikét ÉSelve. ÉS "firecrawl_search_queries_broad" — a TÁG kör: csak a szerep magja (cím/terület), az elengedhetetlen feltételek szigorú kombinációja NÉLKÜL; ez akkor kerül ténylegesen lekérdezésre, ha a szűk kör kevés találatot hoz. MINDKÉT listába sződ bele az (1) pontban megírt geo_scope.catchment_places helyeit releváns helymegjelölésként (pl. a catchment helynevei OR-kapcsolással, ahogy egy éles kereső-lekérdezésben természetes lenne) — a lekérdezések földrajza kövesse a te saját geo_scope-indoklásodat, ne csak a position.location szó szerinti nevét. Boolean lekérdezéseket is adj a szokásos platformokra.
+${LANG}
+KIZÁRÁS — KÖTELEZŐ, HA AZ ÜGYFÉL CÉGE ISMERT: ha a bemenetben szerepel "AZ ÜGYFÉL CÉGE" adat, az a cég SOHA nem lehet célcég, és MINDKÉT lekérdezés-listába (szűk és tág is) negatív szűrőként be kell kerülnie (pl. -"Ügyfél Neve"). Az ügyfél jelenlegi és volt munkatársait a hiring manager amúgy is ismeri; ha bekerülnek a merítésbe, az a keresés hitelét viszi. Az "exclude_companies" listába vedd fel az ügyfél cégét és a felismerhető leányvállalatait. HA AZ ÜGYFÉL CÉGE NEM ISMERT (nincs megadva a bemenetben): SEMMILYEN körülmények között ne találj ki vagy told be helyőrző/placeholder szöveget (pl. "[ÜGYFÉL_CÉGNÉV_MEGADANDÓ]") a lekérdezésekbe — egyszerűen hagyd ki a negatív szűrőt mindkét listából, és az "exclude_companies" legyen üres tömb.
+
+(3) Célcégek, célpozíciók, kulcs-szinonimák — a szokásos módon.
+
+Kimeneti JSON séma (a mezők ebben a sorrendben, hogy a geo_scope megelőzze a lekérdezéseket):
+{
+ "boolean_queries": [ { "platform": "linkedin-xray|github|google", "query": "<lekérdezés, az ügyfél negatív szűrőjével>" } ],
+ "geo_scope": {
+   "search_elasticity": "tight|moderate|loose",
+   "anchor": "<position.location visszaadva>",
+   "catchment_places": [ { "place": "...", "country": "...", "cross_border": true, "note": "<konkrét, evidencia-alapú indok>" } ],
+   "rationale": "<földrajzi indoklás + elasticity-indoklás együtt, önellentmondás-mentesen>"
+ },
+ "firecrawl_search_queries": ["<3-4 szűk lekérdezés, site: operátorokkal, a geo_scope helyeivel és az ügyfél negatív szűrőjével>"],
+ "firecrawl_search_queries_broad": ["<2-3 tág lekérdezés, site: operátorokkal, a geo_scope helyeivel és az ügyfél negatív szűrőjével>"],
+ "target_companies": ["<az ügyfél cége NEM szerepelhet itt>"],
+ "target_titles": ["..."],
+ "synonyms": ["..."],
+ "exclude_companies": ["<az ügyfél cége és leányvállalatai — off-limits>"],
+ "exclusion_note": "<egy mondat: kinek a munkatársai maradnak ki a merítésből és miért>"
+}`;
+```
+
+What changed and why: sections (1) and (2) swapped, so the model reasons through geography before committing to query strings — the JSON schema's field order was moved to match (`geo_scope` now precedes both query arrays), since generation is autoregressive and schema order shapes emission order. Part (2)'s own text now explicitly instructs folding `catchment_places` into both query lists. The KIZÁRÁS paragraph and part (3) are otherwise untouched (same content, just renumbered/repositioned relative to the swap). No field was added, removed, or renamed — this is a reordering + one bridging sentence, not a schema change.
+
+- [ ] **Step 2: Verify demo mode still matches (no live call needed for this check)**
+
+Run: `env -u ANTHROPIC_API_KEY node scripts/test-query-build-demo.js`
+Expected: all 8 `✅` lines, exit 0 — this test only checks field presence/shape, not prompt wording, so it should be unaffected. This confirms the edit didn't break the function syntactically.
+
+- [ ] **Step 3: Soften the geo_fit "mismatch" badge wording**
+
+In `app/public/app.js`, find:
+
+```js
+function geoFitChip(geoFit) {
+  if (!geoFit || geoFit === "unknown") return "";
+  const cls = geoFit === "in_scope" ? "good" : geoFit === "out_of_scope" ? "bad" : "warn";
+  const label = geoFit === "in_scope" ? "helyszín: illeszkedik" : geoFit === "out_of_scope" ? "helyszín: eltér" : "helyszín: bizonytalan";
+  return `<span class="chip ${cls}">${esc(label)}</span>`;
+}
+```
+
+Replace with:
+
+```js
+function geoFitChip(geoFit) {
+  if (!geoFit || geoFit === "unknown") return "";
+  const cls = geoFit === "in_scope" ? "good" : geoFit === "out_of_scope" ? "bad" : "warn";
+  const label = geoFit === "in_scope" ? "helyszín: AI-terv szerint illeszkedik" : geoFit === "out_of_scope" ? "helyszín: AI-terv szerint eltér" : "helyszín: AI-terv szerint bizonytalan";
+  return `<span class="chip ${cls}">${esc(label)}</span>`;
+}
+```
+
+This is deliberately a small wording change, not a suppression/conditional-logic change — it reframes the badge as reporting what the AI's search plan assumed ("AI-terv szerint" = "per the AI plan"), not as an independent verdict on the candidate, so it doesn't read as the product contradicting a recruiter who deliberately searched outside the plan's original geography.
+
+- [ ] **Step 4: Manual verification**
+
+Run: `npm run app`, open a project, confirm the Jelöltek view still renders without console errors (synthetic candidates have `geo_fit: null` so the badge won't show — this is a smoke check that the string change didn't introduce a syntax error, not a visual check of the new wording, which needs a live candidate to see).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add core/capabilities.js app/public/app.js
+git commit -m "capabilities+ui: fold geo_scope into both query tiers, reorder schema so geography precedes queries, soften geo_fit badge wording"
+```
+
+- [ ] **Step 6: Live spot-check if credentials are available**
+
+Not required for task completion, but if `ANTHROPIC_API_KEY` is set, re-running a live `queryBuild` call and confirming `firecrawl_search_queries`/`firecrawl_search_queries_broad` now actually contain place names from `geo_scope.catchment_places` (not just `position.location`'s literal string) is the direct confirmation this fix works on real output, not just passes the unaffected demo-mode test.
