@@ -1585,3 +1585,221 @@ Do not patch by hand-tuning the demo fallback (Task 6) — that only affects no-
 - [ ] **Step 5: Update the README if the geography behavior is worth documenting for users**
 
 Optional — only if you judge it worth surfacing in `README.md`'s existing "📡 A scraping — mit csinál és mit NEM" section. Not required for this plan to be considered done.
+
+---
+
+### Task 16: Live-verification fixes — geo_fit enum validation, extraction retry, conditional exclusion filter
+
+**Why this task exists:** Task 15's live-mode run (real Firecrawl + real Anthropic calls) surfaced three concrete defects that no synthetic/demo test could catch, since they only manifest with real LLM output variance and real noisy web content:
+
+1. On a clean, small batch, live extraction correctly classified `geo_fit` — but the model returned the string `"unclear"` for one candidate, which is not one of the four values `normalize.js`'s own prompt schema defines (`in_scope|adjacent|out_of_scope|unknown`). `core/reach/normalize.js`'s current return mapping (`geo_fit: e.geo_fit || null`) does not validate this, so an arbitrary out-of-schema string can reach the UI's `geoFitChip()` (Task 13), which was only designed to handle the four documented values plus null/undefined.
+2. A larger, noisier live batch (17 raw hits including large non-candidate GitHub content) came back with `location`/`geo_fit` null and generic heuristic-fallback signals for **every single candidate** — the exact signature of the extraction `think()` call throwing (JSON parse failure or similar) and silently falling back to heuristics for the whole batch, with zero retry and zero logging. This is a pre-existing gap already named in this project's own `eval/REPORT.md` fix backlog ("`think()`: 1× retry JSON-parse-hibára") — not something earlier tasks in this plan introduced, but this plan's new `geo_fit` feature is now the most visible casualty of it in live use.
+3. `queryBuild`'s KIZÁRÁS instruction (`core/capabilities.js`) has no explicit fallback for "no client provided" — when `position.client` is empty, the live model invented a literal placeholder string `-"[ÜGYFÉL_CÉGNÉV_MEGADANDÓ]"` and appended it to every single search query (both tiers), observed directly in a live run. Harmless in effect (no real page matches that literal string, so the negative filter is a no-op) but visibly wrong, and now more visible than before since Task 12 surfaces raw queries to the recruiter in the UI.
+
+**Files:**
+- Modify: `core/reach/normalize.js` (fixes 1 and 2)
+- Modify: `core/capabilities.js` (fix 3, the `queryBuild` task prompt only)
+
+**Interfaces:** No signature changes anywhere — these are internal robustness/correctness fixes to functions already wired up by Tasks 3 and 6. Nothing downstream needs to change.
+
+The current `core/reach/normalize.js` (verified, current state after Task 3):
+
+```js
+export async function normalizeHits(hits, geoScope) {
+  const withRef = hits.map((h, i) => ({ ...h, ref: `h${i}` }));
+
+  let extracted = {};
+  if (brainAvailable() && withRef.length) {
+    try {
+      const geoBlock = geoScope ? `FÖLDRAJZI HATÓKÖR (geo_scope):\n${JSON.stringify(geoScope)}\n\n` : "";
+      const input =
+        geoBlock +
+        "TALÁLATOK:\n" +
+        withRef
+          .map(
+            (h) =>
+              `[${h.ref}] forrás=${h.source_type} url=${h.url}\ncím: ${h.title}\nleírás: ${h.description}\nkivonat: ${(h.excerpt || "").slice(0, 800)}`
+          )
+          .join("\n\n");
+      const out = await think({ task: EXTRACT_TASK, input, maxTokens: 6000, temperature: 0.2 });
+      for (const c of out.candidates || []) extracted[c.ref] = c;
+    } catch {
+      // ha az extrakció elhal, jön a heurisztika
+    }
+  }
+
+  return withRef.map((h) => {
+    const e = extracted[h.ref] || {};
+    const name = e.name || heuristicName(h.title);
+    const signals = (e.signals || []).map((s) => ({
+      signal: stripSensitive(s.signal),
+      strength: s.strength || "közepes",
+    }));
+    return {
+      id: idFor(h.url, h.title),
+      synthetic: false,
+      name,
+      headline: stripSensitive(e.headline || h.description || h.title || ""),
+      current_company: e.current_company || null,
+      // A kizárási szabály ("korábban az ügyfélnél dolgozott") ezen a mezőn áll
+      // vagy bukik — ha üres, csak a jelenlegi munkáltatóra tudunk szűrni.
+      past_companies: Array.isArray(e.past_companies) ? e.past_companies.filter(Boolean) : [],
+      location: e.location || null,
+      geo_fit: e.geo_fit || null,
+      is_person: e.is_person !== false,
+      signals: signals.length ? signals : [{ signal: stripSensitive(h.description || ""), strength: "gyenge" }],
+      source_url: h.url,
+      source_type: h.source_type,
+      art14_status: h.source_type === "linkedin" || h.source_type === "synthetic" ? "n/a" : "pending_notice",
+      provenance: {
+        method: "firecrawl-public-web",
+        query: h.query,
+        fetched_at: new Date().toISOString(),
+      },
+    };
+  });
+}
+```
+
+- [ ] **Step 1: Fix 1 + Fix 2 in `core/reach/normalize.js` — validate geo_fit enum, retry extraction once with logging**
+
+Replace the entire `normalizeHits` function above with:
+
+```js
+const VALID_GEO_FIT = ["in_scope", "adjacent", "out_of_scope", "unknown"];
+
+export async function normalizeHits(hits, geoScope) {
+  const withRef = hits.map((h, i) => ({ ...h, ref: `h${i}` }));
+
+  let extracted = {};
+  if (brainAvailable() && withRef.length) {
+    const geoBlock = geoScope ? `FÖLDRAJZI HATÓKÖR (geo_scope):\n${JSON.stringify(geoScope)}\n\n` : "";
+    const input =
+      geoBlock +
+      "TALÁLATOK:\n" +
+      withRef
+        .map(
+          (h) =>
+            `[${h.ref}] forrás=${h.source_type} url=${h.url}\ncím: ${h.title}\nleírás: ${h.description}\nkivonat: ${(h.excerpt || "").slice(0, 800)}`
+        )
+        .join("\n\n");
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const out = await think({ task: EXTRACT_TASK, input, maxTokens: 6000, temperature: 0.2 });
+        for (const c of out.candidates || []) extracted[c.ref] = c;
+        break;
+      } catch (e) {
+        if (attempt === 2) {
+          console.error(`normalizeHits: AI-extrakció 2 kísérlet után is elhalt, heurisztikára esik vissza (${withRef.length} találat): ${e.message}`);
+        }
+      }
+    }
+  }
+
+  return withRef.map((h) => {
+    const e = extracted[h.ref] || {};
+    const name = e.name || heuristicName(h.title);
+    const signals = (e.signals || []).map((s) => ({
+      signal: stripSensitive(s.signal),
+      strength: s.strength || "közepes",
+    }));
+    return {
+      id: idFor(h.url, h.title),
+      synthetic: false,
+      name,
+      headline: stripSensitive(e.headline || h.description || h.title || ""),
+      current_company: e.current_company || null,
+      // A kizárási szabály ("korábban az ügyfélnél dolgozott") ezen a mezőn áll
+      // vagy bukik — ha üres, csak a jelenlegi munkáltatóra tudunk szűrni.
+      past_companies: Array.isArray(e.past_companies) ? e.past_companies.filter(Boolean) : [],
+      location: e.location || null,
+      geo_fit: VALID_GEO_FIT.includes(e.geo_fit) ? e.geo_fit : null,
+      is_person: e.is_person !== false,
+      signals: signals.length ? signals : [{ signal: stripSensitive(h.description || ""), strength: "gyenge" }],
+      source_url: h.url,
+      source_type: h.source_type,
+      art14_status: h.source_type === "linkedin" || h.source_type === "synthetic" ? "n/a" : "pending_notice",
+      provenance: {
+        method: "firecrawl-public-web",
+        query: h.query,
+        fetched_at: new Date().toISOString(),
+      },
+    };
+  });
+}
+```
+
+Note what changed and why: `input` is now built once outside the retry loop (it doesn't depend on the attempt). The `try/catch` becomes a `for` loop trying up to twice; only on the second (final) failure does it log to `console.error` — so a transient failure that succeeds on retry stays silent (no noise in the common case), but a genuine, persistent failure is no longer silent. `geo_fit` is now validated against `VALID_GEO_FIT` before being stored — any value the model returns that isn't one of the four documented options (including things like the observed `"unclear"`) is coerced to `null`, matching the "unknown/unparseable → null" contract the EXTRACT_TASK prompt already documents for the "no geo_scope" case.
+
+- [ ] **Step 2: Verify the module still loads correctly**
+
+Run: `node -e "import('./core/reach/normalize.js').then(m => console.log(typeof m.normalizeHits))"`
+Expected: `function`
+
+- [ ] **Step 3: Fix 3 in `core/capabilities.js` — make the KIZÁRÁS negative filter conditional on a known client**
+
+Find this exact line inside `queryBuild`'s `task` template literal (unchanged since Task 6):
+
+```
+KIZÁRÁS — KÖTELEZŐ: az ügyfél saját cége SOHA nem lehet célcég, és MINDKÉT lekérdezés-listába (szűk és tág is) negatív szűrőként be kell kerülnie (pl. -"Ügyfél Neve"). Az ügyfél jelenlegi és volt munkatársait a hiring manager amúgy is ismeri; ha bekerülnek a merítésbe, az a keresés hitelét viszi. Az "exclude_companies" listába vedd fel az ügyfél cégét és a felismerhető leányvállalatait.
+```
+
+Replace it with:
+
+```
+KIZÁRÁS — KÖTELEZŐ, HA AZ ÜGYFÉL CÉGE ISMERT: ha a bemenetben szerepel "AZ ÜGYFÉL CÉGE" adat, az a cég SOHA nem lehet célcég, és MINDKÉT lekérdezés-listába (szűk és tág is) negatív szűrőként be kell kerülnie (pl. -"Ügyfél Neve"). Az ügyfél jelenlegi és volt munkatársait a hiring manager amúgy is ismeri; ha bekerülnek a merítésbe, az a keresés hitelét viszi. Az "exclude_companies" listába vedd fel az ügyfél cégét és a felismerhető leányvállalatait. HA AZ ÜGYFÉL CÉGE NEM ISMERT (nincs megadva a bemenetben): SEMMILYEN körülmények között ne találj ki vagy told be helyőrző/placeholder szöveget (pl. "[ÜGYFÉL_CÉGNÉV_MEGADANDÓ]") a lekérdezésekbe — egyszerűen hagyd ki a negatív szűrőt mindkét listából, és az "exclude_companies" legyen üres tömb.
+```
+
+This is a single-line find/replace within the existing `task` template literal — do not touch anything else in `queryBuild` (the JSON schema block, the `basis`/`briefFinal` logic, the `input` construction are all untouched by this task).
+
+- [ ] **Step 4: Write a regression test covering both normalize.js fixes**
+
+Create `scripts/test-normalize-robustness.js`:
+
+```js
+// Egységteszt: normalizeHits geo_fit-validáció (nincs élő API-hívás, brainAvailable csak akkor
+// true, ha van kulcs — ez a teszt a nem-live ágat és a validációs logikát célozza direktben).
+import { normalizeHits } from "../core/reach/normalize.js";
+
+function ok(name, cond) {
+  console.log(`${cond ? "✅" : "❌"} ${name}`);
+  if (!cond) process.exitCode = 1;
+}
+
+// Nincs API-kulcs (vagy legalábbis ez a teszt nem attól függ) → brainAvailable() valószínűleg
+// false ebben a környezetben, így az extracted map üres marad, és minden mező a heurisztikus
+// ágra esik — geo_fit ilyenkor mindig null kell legyen, sosem invalid string.
+const hits = [
+  { url: "https://example.com/a", title: "Teszt Elek - Senior Engineer", description: "desc", source_type: "web", query: "q", excerpt: "" },
+];
+const result = await normalizeHits(hits, { catchment_places: [{ place: "Budapest", country: "Hungary", cross_border: false, note: "x" }] });
+ok("normalizeHits nem dob hibát geoScope-pal, API-hívás nélkül is", Array.isArray(result) && result.length === 1);
+ok("geo_fit heurisztikus ágon null (sosem invalid string)", result[0].geo_fit === null);
+
+console.log("\nnormalize robusztusság-teszt kész.");
+```
+
+- [ ] **Step 5: Run the new test plus the full regression sequence**
+
+Run:
+```bash
+node scripts/test-normalize-robustness.js
+node scripts/test-synthetic-geo.js
+node scripts/test-reach-tiers.js
+env -u ANTHROPIC_API_KEY node scripts/test-query-build-demo.js
+env -u ANTHROPIC_API_KEY node scripts/test-rank-geo.js
+npm run smoke
+node scripts/test-mcp.js
+```
+Expected: every script prints only `✅` lines and exits 0 — this task must not regress anything from Tasks 1-14.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add core/reach/normalize.js core/capabilities.js scripts/test-normalize-robustness.js
+git commit -m "reach+capabilities: validate geo_fit enum, retry failed extraction once, stop inventing a client placeholder when none is given"
+```
+
+- [ ] **Step 7: Re-run a live spot-check if `ANTHROPIC_API_KEY`/`FIRECRAWL_API_KEY` are available**
+
+Not required for task completion (no deterministic way to force the original failure on demand), but if credentials are available, re-running the same kind of live `queryBuild` call with no `position.client` set is a good confirmation that the placeholder string no longer appears in `firecrawl_search_queries`/`firecrawl_search_queries_broad`.
