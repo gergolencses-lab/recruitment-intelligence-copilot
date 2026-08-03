@@ -1803,3 +1803,105 @@ git commit -m "reach+capabilities: validate geo_fit enum, retry failed extractio
 - [ ] **Step 7: Re-run a live spot-check if `ANTHROPIC_API_KEY`/`FIRECRAWL_API_KEY` are available**
 
 Not required for task completion (no deterministic way to force the original failure on demand), but if credentials are available, re-running the same kind of live `queryBuild` call with no `position.client` set is a good confirmation that the placeholder string no longer appears in `firecrawl_search_queries`/`firecrawl_search_queries_broad`.
+
+---
+
+### Task 17: Synthetic geo-filter doesn't recognize Hungarian-language country names
+
+**Why this task exists:** Re-running Task 15's location-sensitivity check live (Győr vs Budapest, same brief, `source: "synthetic"`) surfaced a real bug: the live model writes `geo_scope.catchment_places[].country` in Hungarian ("Magyarország", "Szlovákia", "Ausztria" — consistent with the rest of the product's Hungarian-language output), but `core/reach/syntheticReach.js`'s `COUNTRY_NAME_TO_CODE` map (Task 2) only recognizes English names (`hungary`, `poland`, `czechia`, `czech republic`, `romania`, `slovakia`). Every live-generated `geo_scope` therefore maps to zero recognized country codes, `matchesGeo`'s `wantedCodes.size === 0` fail-open rule kicks in, and the synthetic pool filter silently does nothing — every search returns the full 17-candidate pool regardless of location, which is precisely the "just looks for Hungarian candidates" (well, in this case "ignores location entirely") symptom this whole plan set out to fix.
+
+This only affects the **synthetic-pool filter** (Task 2) — it does not affect the live Firecrawl path's per-candidate `geo_fit` classification (Task 3), which reasons freely via the LLM and doesn't depend on any hardcoded country-name map; that path was independently verified correct against live data before this task was written (Budapest/Vienna candidates correctly classified `in_scope`, San Francisco correctly `out_of_scope`). This bug specifically hits the common combination of a live `ANTHROPIC_API_KEY` with `source: "synthetic"` reach (e.g. no `FIRECRAWL_API_KEY` configured, or a recruiter deliberately testing with sample data) — a supported, documented mode per this project's own README.
+
+**Files:**
+- Modify: `core/reach/syntheticReach.js` (the `COUNTRY_NAME_TO_CODE` map only)
+- Test: extend `scripts/test-synthetic-geo.js` (from Task 2) with a case using Hungarian-language country names
+
+**Interfaces:** No signature changes — `matchesGeo`/`gatherSynthetic` behavior only becomes more correct (recognizes more valid country-name spellings), nothing downstream changes.
+
+The current map (verified, current state after Task 2):
+
+```js
+const COUNTRY_NAME_TO_CODE = {
+  hungary: "HU",
+  poland: "PL",
+  czechia: "CZ",
+  "czech republic": "CZ",
+  romania: "RO",
+  slovakia: "SK",
+};
+```
+
+- [ ] **Step 1: Write the failing test**
+
+Add this block to `scripts/test-synthetic-geo.js`, immediately before the final `console.log("\nsyntheticReach geo-szűrés teszt kész.");` line:
+
+```js
+// 6) A geo_scope.country mezőt a live LLM magyarul írja (pl. "Magyarország") — a szűrésnek
+// ezt is fel kell ismernie, nem csak az angol elnevezéseket.
+const hungarianNames = await gatherSynthetic("", {
+  catchment_places: [{ place: "Budapest", country: "Magyarország", cross_border: false, note: "anchor, magyar nyelvű ország-mező" }],
+});
+ok("Magyar nyelvű ország-mező ('Magyarország') → csak magyar helyszínű jelöltek (nem esik vissza a teljes poolra)", hungarianNames.length > 0 && hungarianNames.length < 17 && hungarianNames.every((c) => c.location.trim().toUpperCase().endsWith("HU")));
+
+const hungarianMulti = await gatherSynthetic("", {
+  catchment_places: [
+    { place: "Győr", country: "Magyarország", cross_border: false, note: "anchor" },
+    { place: "Dunaszerdahely", country: "Szlovákia", cross_border: true, note: "határon-átnyúló" },
+  ],
+});
+ok("Magyar nyelvű 'Szlovákia' is felismerve → SK jelölt is bekerül", hungarianMulti.some((c) => c.location.trim().toUpperCase().endsWith("SK")));
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `node scripts/test-synthetic-geo.js`
+Expected: the two new assertions fail (current map doesn't recognize "Magyarország"/"Szlovákia", so `wantedCodes.size === 0` and the fail-open rule returns the full 17-candidate pool instead of a filtered subset).
+
+- [ ] **Step 3: Extend the country-name map**
+
+Replace the `COUNTRY_NAME_TO_CODE` map above with:
+
+```js
+const COUNTRY_NAME_TO_CODE = {
+  hungary: "HU",
+  magyarország: "HU",
+  poland: "PL",
+  lengyelország: "PL",
+  czechia: "CZ",
+  "czech republic": "CZ",
+  csehország: "CZ",
+  csehia: "CZ",
+  romania: "RO",
+  románia: "RO",
+  slovakia: "SK",
+  szlovákia: "SK",
+};
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `node scripts/test-synthetic-geo.js`
+Expected: all assertions (the original 6 from Task 2 plus the 2 new ones) print `✅`, exit code 0.
+
+- [ ] **Step 5: Run the full regression sequence**
+
+```bash
+node scripts/test-synthetic-geo.js
+node scripts/test-reach-tiers.js
+node scripts/test-normalize-robustness.js
+env -u ANTHROPIC_API_KEY node scripts/test-query-build-demo.js
+env -u ANTHROPIC_API_KEY node scripts/test-rank-geo.js
+node scripts/test-mcp.js
+```
+Expected: every script ✅ (note: `npm run smoke` is deliberately excluded here — it hits the known, already-documented, out-of-scope `rankTargets`/`run()` live flake unrelated to this task; don't chase it).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add core/reach/syntheticReach.js scripts/test-synthetic-geo.js
+git commit -m "reach: recognize Hungarian-language country names in synthetic geo-filter"
+```
+
+- [ ] **Step 7: Live spot-check if credentials are available**
+
+Not required for task completion, but if `ANTHROPIC_API_KEY` is set, re-running a live `queryBuild` call for two different Hungarian anchor cities with `source: "synthetic"` discovery and confirming the returned candidate subsets now actually differ (not both falling back to the full 17) is the direct confirmation this bug is fixed for real live output, not just the two literal country strings the test hardcodes.
