@@ -3,7 +3,7 @@
 // Így a körök pontszáma összehasonlítható marad.
 //
 // Egy cella akkor JÓ, ha MIND az öt kapu átmegy:
-//   G1  rugalmasság      — a szerep valós piaci mintázatához illik   (determinisztikus)
+//   G1  rugalmasság      — a szerep valós piaci mintázatához illik   (LLM-bíró)
 //   G2  vonzáskörzet     — a megnevezett helyek valósak és elérhetők (LLM-bíró)
 //   G3  földrajz a query-ben — a catchment nevek tényleg beépültek   (determinisztikus)
 //   G4  megtalálhatóság  — a szűk kör nem szűkült nullára            (LLM-bíró + nyers találat)
@@ -34,7 +34,15 @@ const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
 
 const RUBRIC = `Te magyar munkaerőpiaci és földrajzi szakértő vagy, aki egy fejvadász-kereső rendszer kimenetét auditálja. A mércéd SZIGORÚ: kétség esetén BUKTATSZ. Nem a jóindulatú olvasat a feladatod, hanem az, hogy egy tapasztalt magyar recruiter mit mondana erre a keresésre.
 
-Három kaput kell megítélned.
+Négy kaput kell megítélned.
+
+G1 — RUGALMASSÁG (search_elasticity)
+A kérdés: erre a szerepre EBBEN a városban egy tapasztalt magyar recruiter tényleg ilyen szélesre nyitná-e a földrajzot?
+A mérce a szerep valós utánpótlási mintázata, NEM a munkavégzés helyszíne:
+ - "tight": bőséges helyi kínálat, helyettesíthető szerep, napi ingázási gyűrű a merítés.
+ - "moderate": valóban szűkös helyi kínálat vagy szakértői szerep — tágabb, régiós merítés indokolt.
+ - "loose": felsővezetői vagy ritka szakértői keresés, ahol a költözés a norma; országos/nemzetközi piac.
+BUKIK, ha a választott érték egy recruiter szemében védhetetlen. Legyél tárgyilagos mindkét irányban: a túl szűk és a túl tág is hiba. Vedd figyelembe, hogy egy nagyvárosban bőséges kínálatú szerep egy kisebb városban valóban szűkös lehet — ha a modell EMIATT lépett feljebb, és ezt az indoklás alá is támasztja, az védhető. De ha egyszerű, bőséges kínálatú támogató szerepre nyit tágra pusztán óvatosságból, az bukik.
 
 G2 — VONZÁSKÖRZET (catchment_places)
 A kérdés: egy ilyen szerepre, ilyen fizetésen, EBBŐL a városból tényleg jöhet-e jelölt a felsorolt helyekről?
@@ -58,8 +66,11 @@ Jelöltenként döntsd el: (a) a szerep szempontjából releváns-e a headline/j
 BUKIK, ha 3-nál kevesebb olyan jelölt van, aki szerep szerint releváns ÉS földrajzilag nem mond ellent.
 Fontos: az ismeretlen (null) helyszín önmagában nem földrajzi ellentmondás, de az egyértelműen más országban/más szakmában lévő jelölt igen. A drasztikusan más szakmai sáv (pl. villamosmérnök egy marketing asszisztens keresésben) NEM releváns.
 
-Kimeneti JSON séma — kizárólag ez, magyarázó szöveg nélkül:
+TERJEDELEM: a "per_candidate" tömb LEGFELJEBB 8 elemet tartalmazzon — a döntés szempontjából legfontosabbakat. Az "on_target_count" viszont az ÖSSZES jelöltre vonatkozzon, ne csak a felsoroltakra.
+
+Kimeneti JSON séma — kizárólag ez, magyarázó szöveg vagy komment nélkül:
 {
+ "g1_elasticity": { "pass": true|false, "defensible_value": "tight|moderate|loose", "reason": "<1-2 mondat>" },
  "g2_catchment": { "pass": true|false, "defects": ["<konkrét hiba>"], "reason": "<1-2 mondat>" },
  "g4_findability": { "pass": true|false, "reason": "<1-2 mondat>" },
  "g5_candidates": { "pass": true|false, "on_target_count": <szám>, "per_candidate": [{"name":"...","role_match":true|false,"geo_ok":true|false}], "reason": "<1-2 mondat>" },
@@ -69,7 +80,7 @@ Kimeneti JSON séma — kizárólag ez, magyarázó szöveg nélkül:
 
 async function judgeCell(rec) {
   const q = rec.query || {};
-  const cands = (rec.discover?.candidates || []).map((c) => ({
+  const cands = (rec.discover?.candidates || []).slice(0, 24).map((c) => ({
     name: c.name,
     headline: c.headline,
     current_company: c.current_company,
@@ -81,7 +92,6 @@ async function judgeCell(rec) {
   const input = `MEGBÍZÁS
 Szerep: ${rec.role}
 Helyszín (anchor): ${rec.city}
-Szint: ${rec.expected_elasticity === "loose" ? "felsővezetői" : rec.expected_elasticity === "moderate" ? "szakértői/senior" : "belépő vagy támogató"}
 
 BRIEF (rövidítve):
 ${(rec._brief || "").slice(0, 900)}
@@ -103,7 +113,7 @@ ${JSON.stringify(cands, null, 2)}`;
 
   const resp = await anthropic.messages.create({
     model: JUDGE_MODEL,
-    max_tokens: 3000,
+    max_tokens: 8000,
     system: [{ type: "text", text: RUBRIC }],
     messages: [{ role: "user", content: input + "\n\n---\nVálaszolj KIZÁRÓLAG a megadott JSON objektummal." }],
   });
@@ -142,11 +152,11 @@ const scored = await pool(records, CONCURRENCY, async (rec) => {
   let judge;
   for (let a = 1; a <= 3; a++) {
     try { judge = await judgeCell(rec); break; }
-    catch (e) { if (a === 3) return { id: rec.id, good: false, gates: {}, primary_failure: "BÍRÓ-HIBA: " + e.message, judge: null, rec }; }
+    catch (e) { if (a === 3) { console.error(`  ⚠️ BÍRÓ-HIBA ${rec.id}: ${e.message}`); return { id: rec.id, good: false, judge_error: true, gates: {}, primary_failure: "BÍRÓ-HIBA: " + e.message, judge: null, rec }; } }
   }
   const m = rec.metrics || {};
   const gates = {
-    G1: !!m.elasticity_match,
+    G1: !!judge.g1_elasticity?.pass,
     G2: !!judge.g2_catchment?.pass,
     G3: !!m.geo?.folded_into_narrow,
     G4: !!judge.g4_findability?.pass,
@@ -181,6 +191,8 @@ const out = {
   cells: scored.map((s) => ({
     id: s.id, role: s.role, city: s.city, good: s.good, gates: s.gates,
     primary_failure: s.primary_failure,
+    g1: s.judge?.g1_elasticity,
+    elasticity_vs_prior: { emitted: s.rec.metrics?.elasticity, my_prior: s.rec.expected_elasticity, matched_prior: !!s.rec.metrics?.elasticity_match },
     fix_suggestion: s.judge?.fix_suggestion || null,
     g2: s.judge?.g2_catchment, g4: s.judge?.g4_findability,
     g5: s.judge?.g5_candidates ? { pass: s.judge.g5_candidates.pass, on_target_count: s.judge.g5_candidates.on_target_count, reason: s.judge.g5_candidates.reason } : null,

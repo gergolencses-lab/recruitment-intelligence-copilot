@@ -64,6 +64,23 @@ function isDeepScrapable(sourceType) {
   return ["github", "blog", "community", "web", "xing", "stackoverflow"].includes(sourceType);
 }
 
+// Állásportál / hirdetés-gyűjtő? Ezek a MUNKÁLTATÓ hirdetéseit adják vissza, nem
+// jelölteket — sosem lehet belőlük személy. Mérve: a szűrő nélkül a scrape-keret
+// 3-5/6 részét álláshirdetések vitték el, és a jelöltszám ezzel arányosan esett.
+const JOB_AD_URL = new RegExp(
+  [
+    "profession\\.hu", "cvonline\\.", "jobline\\.", "qjob\\.", "workania\\.",
+    "indeed\\.", "jooble\\.", "monster\\.", "glassdoor\\.", "allasportal",
+    "karrier\\.hu", "allas\\.hu", "jobsgarden", "randstad\\.", "hays\\.",
+    "facebook\\.com/jobs", "linkedin\\.com/jobs", "/allasok/", "/allas/", "/jobs/",
+  ].join("|"),
+  "i"
+);
+
+export function isJobAdUrl(url) {
+  return JOB_AD_URL.test(String(url || ""));
+}
+
 /**
  * Keresés (nincs scrapelés) több lekérdezésből, URL szerint dedupelve.
  * Visszaad: [{url, title, description, source_type, excerpt: "", query}]
@@ -71,6 +88,7 @@ function isDeepScrapable(sourceType) {
 export async function searchHits(queries, { onProgress } = {}) {
   const capped = (queries || []).filter(Boolean).slice(0, 5);
   const seen = new Map();
+  let droppedAds = 0;
 
   for (const q of capped) {
     onProgress && onProgress(`Keresés: ${q}`);
@@ -83,6 +101,11 @@ export async function searchHits(queries, { onProgress } = {}) {
     }
     for (const r of rows) {
       if (seen.has(r.url)) continue;
+      // Álláshirdetés sosem lesz jelölt — dobjuk, mielőtt scrape-keretet enne.
+      if (isJobAdUrl(r.url)) {
+        droppedAds++;
+        continue;
+      }
       seen.set(r.url, {
         url: r.url,
         title: r.title,
@@ -94,6 +117,9 @@ export async function searchHits(queries, { onProgress } = {}) {
     }
   }
 
+  if (droppedAds) {
+    onProgress && onProgress(`${droppedAds} álláshirdetés-találat kiszűrve (nem jelölt-forrás).`);
+  }
   return [...seen.values()];
 }
 

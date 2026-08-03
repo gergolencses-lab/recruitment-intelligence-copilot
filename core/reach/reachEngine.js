@@ -14,6 +14,25 @@ function pickSource(requested) {
 }
 
 /**
+ * Olcsó előkapu: már a NYERS találatszám is kevés, még scrapelés előtt.
+ * @returns {boolean}
+ */
+export function shouldBroadenOnHits({ hitCount, hasBroad, threshold }) {
+  return hasBroad && hitCount < threshold;
+}
+
+/**
+ * Valódi kapu: sok nyers találat is adhat kevés HASZNÁLHATÓ jelöltet, mert a
+ * találatok nagy része nem személy (céglista, cikk, hirdetés). A kibővítést
+ * ezért a jelöltszámhoz kötjük, nem a találatszámhoz — ez volt az a hiba,
+ * ami miatt 12-13 találatos cellák 1-2 jelölttel értek véget bővítés nélkül.
+ * @returns {boolean}
+ */
+export function shouldBroadenOnCandidates({ personCount, alreadyBroadened, hasBroad, minCandidates }) {
+  return hasBroad && !alreadyBroadened && personCount < minCandidates;
+}
+
+/**
  * @param {object} p
  * @param {string[]} p.searchQueries - szűk körű firecrawl keresési lekérdezések (a queryBuild "firecrawl_search_queries" kimenete)
  * @param {string[]} [p.broadSearchQueries] - tág körű lekérdezések, csak akkor futnak, ha a szűk kör kevés találatot hoz
@@ -40,7 +59,11 @@ export async function discover({ searchQueries, broadSearchQueries, geoScope, so
   onProgress && onProgress("Firecrawl publikus-web discovery indul (szűk kör)…");
   let hits = await searchHits(searchQueries, { onProgress });
   let broadened = false;
-  if (hits.length < config.reachBroadenThreshold && (broadSearchQueries || []).length) {
+  const hasBroad = (broadSearchQueries || []).length > 0;
+
+  // 1) Olcsó előkapu: ha már a nyers találatszám is kevés, bővítsünk MÉG a
+  //    scrapelés előtt — így a tág kör találatai is részesülnek a scrape-keretből.
+  if (shouldBroadenOnHits({ hitCount: hits.length, hasBroad, threshold: config.reachBroadenThreshold })) {
     broadened = true;
     onProgress && onProgress(`Kevés találat (${hits.length}) — kibővített kereséssel folytatjuk…`);
     const more = await searchHits(broadSearchQueries, { onProgress });
@@ -56,8 +79,32 @@ export async function discover({ searchQueries, broadSearchQueries, geoScope, so
   hits = await scrapeTopHits(hits, { onProgress });
 
   onProgress && onProgress(`normalizálás…`);
-  const candidates = await normalizeHits(hits, geoScope);
-  const persons = candidates.filter((c) => c.is_person !== false);
+  let candidates = await normalizeHits(hits, geoScope);
+  let persons = candidates.filter((c) => c.is_person !== false);
+
+  // 2) Valódi kapu: sok nyers találat is adhat kevés HASZNÁLHATÓ jelöltet, mert a
+  //    találatok nagy része nem személy. Ilyenkor az előkapu nem sült el — itt
+  //    pótoljuk, a jelöltszám alapján.
+  if (shouldBroadenOnCandidates({
+    personCount: persons.length, alreadyBroadened: broadened,
+    hasBroad, minCandidates: config.reachMinCandidates,
+  })) {
+    broadened = true;
+    onProgress && onProgress(
+      `Kevés használható jelölt (${persons.length} a ${hits.length} találatból) — kibővített kereséssel folytatjuk…`
+    );
+    const more = await searchHits(broadSearchQueries, { onProgress });
+    const seen = new Set(hits.map((h) => h.url));
+    const fresh = more.filter((h) => !seen.has(h.url));
+    if (fresh.length) {
+      const scraped = await scrapeTopHits(fresh, { onProgress });
+      const extra = await normalizeHits(scraped, geoScope);
+      const known = new Set(candidates.map((c) => c.id));
+      candidates = candidates.concat(extra.filter((c) => !known.has(c.id)));
+      persons = candidates.filter((c) => c.is_person !== false);
+      hits = hits.concat(scraped);
+    }
+  }
   return {
     source: "firecrawl",
     candidates: persons,

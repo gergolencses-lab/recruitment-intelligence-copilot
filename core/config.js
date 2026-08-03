@@ -39,6 +39,9 @@ export const config = {
   reachScrapeTop: parseInt(process.env.REACH_SCRAPE_TOP || "6", 10),
   reachDefaultSource: process.env.REACH_DEFAULT_SOURCE || "auto",
   reachBroadenThreshold: parseInt(process.env.REACH_BROADEN_THRESHOLD || "6", 10),
+  // Nyers találat != használható jelölt. A találatok nagy része nem személy
+  // (céglista, cikk, hirdetés), ezért a kibővítés valódi kapuja a JELÖLTSZÁM.
+  reachMinCandidates: parseInt(process.env.REACH_MIN_CANDIDATES || "6", 10),
 
   port: parseInt(process.env.PORT || "5178", 10),
 };

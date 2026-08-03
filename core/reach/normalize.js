@@ -16,7 +16,7 @@ function heuristicName(title) {
   return t || "(ismeretlen)";
 }
 
-const EXTRACT_TASK = `FELADAT: Nyers webes találatokból strukturálj passzív jelölt-rekordokat egy fejvadász-kutatáshoz (senior tech / CEE).
+const EXTRACT_TASK = `FELADAT: Nyers webes találatokból strukturálj passzív jelölt-rekordokat egy fejvadász-kutatáshoz. A szerep bármilyen szakterület és bármilyen szenioritás lehet (belépő szintű asszisztenstől felsővezetőig) — ne feltételezz tech- vagy senior-fókuszt.
 Minden találathoz adj vissza egy objektumot. CSAK azt írd le, ami a szövegből EVIDENCIÁLISAN kiolvasható; ne találj ki nevet, céget, tényt.
 Ha egy találat nyilván NEM személy (pl. céglista, álláshirdetés, cikk), akkor is add vissza, de jelöld: "is_person": false.
 
