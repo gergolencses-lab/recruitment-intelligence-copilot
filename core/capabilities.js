@@ -54,6 +54,33 @@ Kimeneti JSON séma:
   return run("intakeReframe", { task, input: `BRIEF:\n${brief}${positionCtx(position)}`, demoInput: { brief } }, projectId);
 }
 
+// A megbízás helyszíne SOHA nem eshet ki a merítésből. A modell — helyes
+// vonzáskörzeti gondolkodás mellett is — hajlamos a listát "az anchor KÖRÜLI
+// gyűrűként" érteni és magát az anchort kihagyni (mérve: 8/10 cella egy
+// prompt-változat után). A prompt ezt tiltja, ez a guard pedig garantálja.
+export function ensureAnchorInScope(geoScope, location) {
+  const anchor = String(location || "").trim();
+  if (!geoScope || typeof geoScope !== "object" || !anchor) return geoScope;
+
+  const places = Array.isArray(geoScope.catchment_places) ? [...geoScope.catchment_places] : [];
+  const norm = (x) => String(x || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  // Az anchor akkor is "benne van", ha egy összevont mezőben szerepel
+  // (a modell néha "Gyál / Dunaharaszti" formában ad meg egy elemet).
+  const present = places.some((p) =>
+    String(p && p.place || "").split(/[\/,;]| és | vagy /).some((part) => norm(part) === norm(anchor))
+  );
+
+  if (!present) {
+    places.unshift({
+      place: anchor,
+      country: "Magyarország",
+      cross_border: false,
+      note: "a megbízás helyszíne (automatikusan pótolva)",
+    });
+  }
+  return { ...geoScope, anchor: geoScope.anchor || anchor, catchment_places: places };
+}
+
 // ── 🧠 KERESÉSI TERV ─────────────────────────────────────────
 export async function queryBuild({ intake, brief, position, briefFinal }, { projectId } = {}) {
   const client = (position && position.client) || "";
@@ -62,8 +89,8 @@ export async function queryBuild({ intake, brief, position, briefFinal }, { proj
 (1) FÖLDRAJZI HATÓKÖR ("geo_scope"): gondolkodj el a szerep valódi keresési földrajzán, MIELŐTT a lekérdezéseket megírnád — a lekérdezések ebből fognak építkezni. NE adj meg konkrét perc- vagy km-adatot — ehhez nincs megbízható adatod, csak relatív/összehasonlító ítéleted lehet ("X közelebb van az anchorhoz, mint Y").
 
 A vonzáskörzetet EBBEN A SORRENDBEN építsd fel:
- a) Az anchor (position.location) MINDIG az első elem, a rugalmasságtól függetlenül.
- b) Ezután a VALÓDI napi ingázó-gyűrű: az anchorba vezető fő közúti és vasúti folyosók mentén fekvő KISVÁROSOK és nagyközségek. Ezek adják a tényleges napi merítést. Tipikus hiba, amit kerülj el: a megye ismert nagyvárosait felsorolni a valódi ingázó települések helyett. Ha a listádon csak megyeszékhelyek és országosan ismert városok szerepelnek, a lista majdnem biztosan rossz — nevezd meg konkrétan az anchor körüli szűkebb gyűrű településeit (Győr körül pl. Csorna, Pannonhalma, Tét, Abda, Nyúl, Kapuvár; Székesfehérvár körül pl. Mór, Bicske, Polgárdi, Martonvásár, Velence, Gárdony, Várpalota; Pécs körül pl. Komló, Szigetvár, Mohács, Bóly).
+ a) Az anchor (position.location) MINDIG az első elem — a rugalmasságtól függetlenül, MINDEN esetben. A catchment_places NEM "az anchor körüli gyűrű", hanem a teljes merítési terület, amelynek maga az anchor a legfontosabb eleme: a legtöbb jelölt jellemzően magában az anchorban van. Ha az anchor kimarad a listából, a keresés a megbízás helyszínét hagyja ki — ez a lehető legsúlyosabb földrajzi hiba.
+ b) Az anchor UTÁN következik a VALÓDI napi ingázó-gyűrű: az anchorba vezető fő közúti és vasúti folyosók mentén fekvő KISVÁROSOK és nagyközségek. Ezek adják a tényleges napi merítést. Tipikus hiba, amit kerülj el: a megye ismert nagyvárosait felsorolni a valódi ingázó települések helyett. Ha a listádon csak megyeszékhelyek és országosan ismert városok szerepelnek, a lista majdnem biztosan rossz — nevezd meg konkrétan az anchor körüli szűkebb gyűrű településeit (Győr körül pl. Csorna, Pannonhalma, Tét, Abda, Nyúl, Kapuvár; Székesfehérvár körül pl. Mór, Bicske, Polgárdi, Martonvásár, Velence, Gárdony, Várpalota; Pécs körül pl. Komló, Szigetvár, Mohács, Bóly).
  c) Nagyvárost csak akkor vegyél fel, ha az ingázás IRÁNYA ÉS a szerep BÉRSZINTJE is alátámasztja. Az ingázás alapértelmezett iránya a kisebb, olcsóbb településről a nagyobb, jobban fizető központ FELÉ tart. A nagyvárosból az anchor felé irányuló FORDÍTOTT ingázás csak akkor reális, ha a szerep bére és szintje megfizeti (mérnöki, szakértői, vezetői sáv) — belépő szintű vagy adminisztratív bérszinten NEM az. Ugyanaz a várospár tehát az egyik szerepnél helyes, a másiknál hibás: Székesfehérvárra egy autóipari mérnöki szerephez Budapest és agglomerációja a legfontosabb merítés, egy asszisztensi szerephez viszont irreális.
  d) HATÁR MENTI ANCHOR (pl. Győr, Sopron, Mosonmagyaróvár, Szeged, Debrecen, Békéscsaba, Nyíregyháza, Esztergom, Komárom): a szomszédos ország ingázási zónáját ALAPÉRTELMEZETTEN vedd fel — különösen ahol jelentős magyar ajkú lakosság él (szlovák oldalon a Csallóköz: Dunaszerdahely, Somorja, Komárno, valamint Bratislava agglomerációja; a romániai és szerbiai határsáv). Ez nem "evidencia hiányában elhagyható" elem, hanem ezeknek a városoknak az alapvető utánpótlási csatornája. A határt NE tekintsd automatikus akadálynak; csak akkor hagyd ki, ha a brief nyelvi, jogi vagy engedélyezési okból kizárja.
 
@@ -77,6 +104,7 @@ Mielőtt továbblépnél: ellenőrizd, hogy a "search_elasticity" összhangban v
 - ha "moderate"-ot adsz meg, a listán valóban régiós léptékű városoknak is szerepelniük kell, nem csak egy szűk helyi gyűrűnek;
 - ha "loose"-t adsz meg, ne ingázó-gyűrűt sorolj fel, hanem országos és nemzetközi központokat.
 Ha a címke és a lista nem fedi egymást, javítsd az egyiket.
+UTOLSÓ ELLENŐRZÉS a geo_scope lezárása előtt: szerepel-e az anchor a catchment_places első elemeként? Ha nem, vedd fel.
 ALAPÉRTELMEZÉS: a teljes helyszíni jelenlétet igénylő, bőséges helyi kínálatú támogató vagy adminisztratív szerep (asszisztens, irodai ügyintéző, recepciós, belépő szintű marketinges) "tight". A bizalmi jelleg, a diszkréció igénye, a tárgyalóképes nyelvtudás vagy a néhány éves tapasztalat önmagában NEM indokolja a kinyitást — ezek a támogató sávban általánosak, nem ritkaságjelek. Csak akkor lépj "moderate"-ra, ha a helyi kínálat valóban szűkös, és ezt az indoklásban meg is nevezed. "loose" rugalmasság esetén is adj meg valós, konkrét helyeket (pl. domináns szakmai-vezetői központokat, releváns nemzetközi csomópontokat a brief kontextusához kötve) — az üres lista nem elfogadható válasz.
 
 (2) LEKÉRDEZÉSEK.
@@ -121,7 +149,11 @@ Kimeneti JSON séma (a mezők ebben a sorrendben, hogy a geo_scope megelőzze a 
   const input = `POZÍCIÓ-ÖSSZEFOGLALÓ (a keresés alapja):\n${J(basis)}${positionCtx(position)}${
     client ? `\n\nAZ ÜGYFÉL CÉGE (kizárandó): ${client}` : ""
   }`;
-  return run("queryBuild", { task, input, demoInput: { intake, client } }, projectId);
+  const out = await run("queryBuild", { task, input, demoInput: { intake, client } }, projectId);
+  if (out && out.geo_scope) {
+    out.geo_scope = ensureAnchorInScope(out.geo_scope, position && position.location);
+  }
+  return out;
 }
 
 // ── 🧭 STRATÉGIA-ASSZISZTENS ─────────────────────────────────
